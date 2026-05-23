@@ -1,0 +1,39 @@
+# requirements.txt
+# MedCLIP-SAMv2 replication dependencies
+#
+# IMPORTANT: Install PyTorch FIRST with the correct CUDA version for your GPU.
+# Do NOT install torch from this file — the CUDA build must match your driver.
+#
+# PyTorch install (RTX 4060 Ti, CUDA 12.x):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#
+# PyTorch install (Kaggle / Colab):
+#   Already installed — skip.
+#
+# Then install everything else:
+#   pip install -r requirements.txt
+
+# Vision-language model
+open_clip_torch==2.24.0
+
+# Segmentation foundation model
+# Install via git (not on PyPI):
+#   pip install git+https://github.com/facebookresearch/segment-anything.git
+segment-anything @ git+https://github.com/facebookresearch/segment-anything.git
+
+# Medical image segmentation framework
+nnunetv2>=2.2.1
+
+# Image processing
+scikit-image>=0.21.0
+Pillow>=9.5.0
+
+# Scientific computing
+numpy>=1.24.0
+scipy>=1.11.0
+
+# Data handling
+pandas>=1.5.0
+
+# Progress and utilities
+tqdm>=4.65.0
