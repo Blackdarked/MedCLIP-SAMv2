@@ -1,38 +1,44 @@
-<<<<<<< HEAD
-# MedCLIP-SAMv2 Replication
+# MedCLIP-SAMv2 — Unofficial Replication
 
-Replication of **MedCLIP-SAMv2: Towards Universal Text-Driven Medical Image Segmentation** (Koleilat et al., 2025).
+Unofficial Windows replication of **MedCLIP-SAMv2: Towards Universal Text-Driven Medical Image Segmentation** (Koleilat et al., 2024) on an RTX 4060 Ti (16 GB VRAM).
 
-> Koleilat T., Asgariandehkordi H., Rivaz H., Xiao Y. (2025). MedCLIP-SAMv2: Towards Universal Text-Driven Medical Image Segmentation. *Medical Image Analysis*. arXiv:2409.19483v4.
+> Koleilat T., Asgariandehkordi H., Rivaz H., Xiao Y. (2024). MedCLIP-SAMv2: Towards Universal Text-Driven Medical Image Segmentation. arXiv:2409.19483.
 
 Original paper code: https://github.com/HealthX-Lab/MedCLIP-SAMv2
 
 ---
 
-## What this replication covers
+## Pipeline
 
-| Component | Status |
-|-----------|--------|
-| DHN-NCE fine-tuning of BiomedCLIP | ✓ Full implementation |
-| M2IB zero-shot saliency maps | ✓ Full implementation |
-| Otsu + Connected Component post-processing | ✓ Full implementation |
-| SAM ViT-H visual prompting | ✓ Full implementation |
-| nnUNet weakly supervised training | ✓ Full implementation |
-| Cyclical LR + checkpoint ensemble (Zhao 2022) | ✓ Full implementation |
-| DSC + NSD evaluation with paired t-tests | ✓ Full implementation |
-| All 4 datasets (Breast US, Brain MRI, Lung X-ray, Lung CT) | ✓ |
+Three-stage weakly supervised segmentation:
+
+1. **Stage 1 — BiomedCLIP fine-tuning**: domain adaptation via DHN-NCE contrastive loss on MedPix 2.0 + ROCO radiology image-text pairs.
+2. **Stage 2 — Zero-shot segmentation**: M2IB saliency maps → Otsu thresholding + connected-component filtering → SAM ViT-H visual prompting (bbox or point prompts).
+3. **Stage 3 — Weakly supervised nnUNet**: nnUNet trained on Stage 2 pseudo-labels using a cyclical LR schedule with Bayesian checkpoint ensemble (Zhao et al., 2022).
 
 ---
 
-## Target results (Table 1)
+## Results
 
-| Dataset | Zero-shot DSC | Zero-shot NSD | Weakly Sup DSC | Weakly Sup NSD |
-|---------|:------------:|:-------------:|:--------------:|:--------------:|
-| Breast Ultrasound | 77.76% | 81.11% | 78.87% | 84.58% |
-| Brain MRI | 76.52% | 82.23% | 80.03% | 88.25% |
-| Lung X-ray | 75.79% | 80.88% | 80.77% | 84.53% |
-| Lung CT | 80.38% | 82.03% | 88.78% | 91.95% |
-| **Average** | **77.61%** | **81.56%** | **82.11%** | **87.33%** |
+Replicated results vs. Table 1 of the paper (DSC %, higher is better):
+
+| Dataset | ZS DSC (paper) | ZS DSC (ours) | WS DSC (paper) | WS DSC (ours) |
+|---------|:--------------:|:-------------:|:--------------:|:-------------:|
+| Breast US | 77.76% | 5.17% | 78.87% | 5.61% |
+| Brain MRI | 76.52% | 4.86% | 80.03% | 5.01% |
+| Lung X-ray | 75.79% | **50.01%** | 80.77% | **49.62%** |
+| Lung CT | 80.38% | 7.93% | 88.78% | 9.04% |
+
+> **X-ray** produces plausible segmentations (~50% DSC). The gap on breast/brain/CT is under
+> investigation — M2IB saliency maps produce near-empty masks on those modalities despite the
+> SAM coordinate fix being applied. The nnUNet trained on these poor pseudo-labels cannot
+> recover meaningful segmentations.
+
+![X-ray best predictions](assets/xray_summary_best.png)
+
+*Breast (worst 10 cases — illustrating the open M2IB saliency issue):*
+
+![Breast worst predictions](assets/breast_summary_worst.png)
 
 ---
 
@@ -47,7 +53,10 @@ stage3_nnunet.py        nnUNet dataset prep, training, ensemble inference
 cyclical_trainer.py     nnUNet custom trainer (cyclical LR + checkpoint saving)
 evaluate.py             DSC, NSD, paired t-tests, all result tables
 run_all.py              Master pipeline runner
+visualize.py            Side-by-side prediction visualizations
+verify.py               Pre-run data/model dependency checker
 requirements.txt        Python dependencies
+full_run.bat            Windows one-click launcher
 ```
 
 ---
@@ -56,13 +65,13 @@ requirements.txt        Python dependencies
 
 ### 1. Hardware requirements
 
-- GPU with ≥ 8GB VRAM (tested on RTX 4060 Ti 16GB)
-- Python 3.10+
-- Windows 10/11 or Linux
+- GPU with ≥ 16 GB VRAM (tested: RTX 4060 Ti 16 GB)
+- Python 3.11
+- Windows 10/11 (Linux should work with minor path adjustments)
 
 ### 2. Install PyTorch
 
-Install first, separately from the rest, to get the right CUDA build:
+Install separately first to get the correct CUDA build:
 
 ```bash
 # CUDA 12.x (RTX 40-series)
@@ -75,83 +84,94 @@ python -c "import torch; print(torch.cuda.get_device_name(0))"
 ### 3. Install dependencies
 
 ```bash
+git clone <repo-url>
+cd MedCLIP-SAMv2
+python -m venv venv
+venv\Scripts\activate        # Windows
+# source venv/bin/activate   # Linux/macOS
 pip install -r requirements.txt
 ```
 
 ### 4. Download SAM ViT-H weights
 
 ```bash
-# ~2.4 GB
-curl -L https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth \
-     -o sam_vit_h_4b8939.pth
+# ~2.4 GB — place at models/sam_vit_h_4b8939.pth
+curl -L https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth ^
+     -o models\sam_vit_h_4b8939.pth
 ```
 
-Move to: `C:\medclip_samv2\models\sam_vit_h_4b8939.pth`
+### 5. Download datasets
 
-### 5. Configure paths
+Place all data under `data/` using the layout below. Run `python verify.py` afterwards to
+confirm everything is found correctly.
 
-Edit `config.py`:
-
-```python
-BASE_DIR = r'C:\medclip_samv2'   # your project root
-VRAM_GB  = 16                     # 8 or 16
+```
+data/
+  breast_tumors/
+    train/{images/, masks/}   val/{images/, masks/}   test/{images/, masks/}
+  brain_tumors/
+    train/{images/, masks/}   val/{images/, masks/}   test/{images/, masks/}
+  lung_Xray/
+    train/{images/, masks/}   val/{images/, masks/}   test/{images/, masks/}
+  lung_CT/
+    train/{images/, masks/}   val/{images/, masks/}   test/{images/, masks/}
+  medpix_dataset/
+    images/   metadata.json
+  roco-dataset-kaggle/
+    all_data/{train/, validation/, test/}   (each with images/ and Captions.csv)
+models/
+  sam_vit_h_4b8939.pth
 ```
 
-### 6. Download datasets
-
-| Dataset | Source | Path |
-|---------|--------|------|
-| MedPix 2.0 | https://medpix.nlm.nih.gov | `data/medpix/` |
-| ROCO | https://github.com/razorx89/roco-dataset | `data/roco/` |
-| BUSI | Kaggle: `aryashah2k/breast-ultrasound-images-dataset` | `data/BUSI/` |
-| Brain Tumor MRI | Kaggle: `masoudnickparvar/brain-tumor-mri-dataset` | `data/brain_tumor_mri/` |
-| COVID-QU-Ex | Kaggle: `tawsifurrahman/covid19-radiography-database` | `data/COVID_QU_Ex/` |
-| Lung CT | Kaggle: `kmader/finding-lungs-in-ct-data` | `data/lung_ct/` |
-
-### 7. Create directories
-
-```bash
-python -c "from config import Paths; Paths.makedirs()"
-```
+| Dataset | Source |
+|---------|--------|
+| Breast Tumors (BUSI / UDIAT) | Kaggle: `aryashah2k/breast-ultrasound-images-dataset` |
+| Brain Tumors (Br35H) | Kaggle: `masoudnickparvar/brain-tumor-mri-dataset` |
+| Lung X-ray (Montgomery + Shenzhen) | Kaggle: `nikhilpandey360/chest-xray-masks-and-labels` |
+| Lung CT (LUNA16 subset) | Kaggle: `kmader/finding-lungs-in-ct-data` |
+| MedPix 2.0 | https://medpix.nlm.nih.gov |
+| ROCO | Kaggle: `virajbagal/roco-dataset` |
+| SAM ViT-H | https://github.com/facebookresearch/segment-anything#model-checkpoints |
 
 ---
 
 ## Running
 
-### Full pipeline (all 4 datasets)
-
 ```bash
-python run_all.py
+# Verify data layout and model weights
+python verify.py
+
+# Full pipeline — Windows one-click
+full_run.bat
+
+# Or step-by-step
+python run_all.py                      # all 3 stages + evaluation
+python run_all.py --skip-stage1        # resume from Stage 2 (BiomedCLIP already fine-tuned)
+python run_all.py --eval-only          # re-run evaluation only
+python run_all.py --dataset breast     # single dataset
+
+# Visualize predictions (4-panel grids: input | GT | zero-shot | nnUNet)
+python visualize.py --dataset breast --n 20
+python visualize.py --dataset all
 ```
 
-### One dataset at a time
+Results are saved to `working/results.json`. Visualizations go to `working/visualizations/`.
 
-```bash
-python run_all.py --dataset breast
-python run_all.py --dataset brain
-python run_all.py --dataset xray
-python run_all.py --dataset ct
-```
+---
 
-### Skip Stage 1 (use pre-trained BiomedCLIP)
+## Windows-specific fixes applied
 
-```bash
-python run_all.py --skip-stage1
-```
+Non-obvious issues encountered porting the pipeline to Windows — all already fixed in this repo:
 
-### Resume after interruption
-
-```bash
-python run_all.py --resume
-```
-
-M2IB progress auto-saves every 200 images. nnUNet resumes via `--c` flag.
-
-### Evaluation only
-
-```bash
-python run_all.py --eval-only
-```
+| Issue | Fix |
+|-------|-----|
+| `UnicodeEncodeError` from nnUNet Unicode box-drawing chars | `set PYTHONIOENCODING=utf-8` in `full_run.bat` |
+| DataLoader deadlock | `num_workers=0` in all DataLoaders |
+| nnUNet CLI not found in venv subprocess | `Scripts/` dir injected into subprocess `PATH` |
+| M2IB 224×224 masks → wrong SAM prompts | Saliency maps upscaled to original resolution before bbox/point extraction |
+| Weakly supervised DSC = 0% | nnUNet outputs class-index PNGs (values 0/1); threshold changed from `> 127` to `> 0` |
+| `TypeError: missing argument 'unpack_dataset'` | `nnUNetTrainerCyclicalLR.__init__` signature matched to installed nnunetv2 API |
+| `AttributeError: 'NoneType'.step` crash | `on_train_epoch_start` override skips base-class `lr_scheduler.step()` call |
 
 ---
 
@@ -159,47 +179,48 @@ python run_all.py --eval-only
 
 ### DHN-NCE loss (paper equations 9–13)
 
-The hardness weight exponent uses the **temperature-scaled** similarity `β · (I·T)/τ`, not the raw dot product. This is the correct reading of equation 12. At β=0.15 and τ=0.6, the exponent is `exp(0.25 · dot_product)`, giving noticeably sharper hardness contrast than `exp(0.15 · dot_product)`.
+The hardness weight exponent uses the **temperature-scaled** similarity `β · (I·T)/τ`, not the
+raw dot product. At β=0.15 and τ=0.6 this gives `exp(0.25 · dot_product)`, producing sharper
+hardness contrast than `exp(0.15 · dot_product)`.
 
 ### Fine-tuning epochs
 
-The paper states LR=1e-6, 50% decay rate, batch=64 but does not specify epoch count. This replication uses early stopping (patience=3, max 20 epochs) as the stopping criterion, which is the standard approach when epoch count is unspecified.
+The paper states LR=1e-6, 50% decay, batch=64 but does not specify epoch count. This
+replication uses early stopping (patience=3, max 20 epochs).
 
-### "All" column computation
+### Cyclical LR schedule (nnUNet, Zhao et al. 2022)
 
-The paper's "All" column pools all test-set predictions from all four datasets into a single list before computing mean ± std. This differs from averaging per-dataset means when dataset sizes are unequal (113, 600, 957, 1800 images).
+The paper uses 3 cycles × 200 epochs = 600 epochs at 250 iterations/epoch. To fit within a
+24-hour window on a single GPU, this replication uses 1 cycle × 200 epochs at 50
+iterations/epoch. The LR shape and plateau checkpoint saving (10 checkpoints per cycle) are
+preserved.
 
 ### Paired t-tests
 
-Paper: "Paired-sample t-tests were also conducted to validate the observed trends, with a p-value of less than 0.05 indicating statistical significance." All table comparisons include p-values via `scipy.stats.ttest_rel`.
-
-### Windows-specific
-
-- `num_workers=0` in all DataLoaders (Windows multiprocessing)
-- `subprocess.run()` instead of `os.system()` for nnUNet CLI calls
-- `if __name__ == '__main__':` guard in `run_all.py` (required for nnUNet on Windows)
+Per the paper: "Paired-sample t-tests were conducted to validate observed trends, with p < 0.05
+indicating statistical significance." All table comparisons include p-values via
+`scipy.stats.ttest_rel`.
 
 ---
 
 ## Known limitations
 
-- **UDIAT dataset** (breast validation/test): requires institutional access from Byra et al. (2020). If unavailable, use an 80/10/10 split of BUSI — breast numbers will differ slightly from the paper.
-- **M2IB implementation**: our implementation approximates the official Wang et al. (2024) code. For exact reproduction, replace `M2IBExtractor` in `stage2_segmentation.py` with the official repo at https://github.com/YingWang-NYU/M2IB.
-- **Number of fine-tuning epochs**: not stated in paper; results may vary slightly depending on when early stopping triggers.
+- **UDIAT dataset** (breast validation/test): requires institutional access. If unavailable, use
+  an 80/10/10 split of BUSI; breast numbers will differ from the paper.
+- **M2IB saliency quality**: breast/brain/CT produce near-empty zero-shot masks in this
+  replication (5–8% DSC vs 77–80% in the paper). Root cause is under investigation.
+- **Reduced training compute**: 1 cycle × 50 iter/epoch instead of 3 cycles × 250 iter/epoch
+  to meet timing constraints; may lower nnUNet ceiling.
 
 ---
 
 ## Citation
 
 ```bibtex
-@article{koleilat2025medclipsamv2,
+@article{koleilat2024medclipsamv2,
   title={MedCLIP-SAMv2: Towards Universal Text-Driven Medical Image Segmentation},
   author={Koleilat, Taha and Asgariandehkordi, Hojat and Rivaz, Hassan and Xiao, Yiming},
-  journal={Medical Image Analysis},
-  year={2025},
-  note={arXiv:2409.19483}
+  journal={arXiv preprint arXiv:2409.19483},
+  year={2024}
 }
 ```
-=======
-# MedCLIP-SAMv2
->>>>>>> 68d31be0adf1ae258ddff95b2b565674d30a9c06

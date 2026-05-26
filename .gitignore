@@ -1,0 +1,10 @@
+/data/
+/models/
+/venv/
+/working/
+/__pycache__/
+/.claude/
+*.log
+*.done
+paper.pdf
+folder_structure.txt

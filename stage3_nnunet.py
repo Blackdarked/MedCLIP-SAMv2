@@ -103,12 +103,18 @@ def run_cmd(cmd: str) -> int:
     Run a shell command via subprocess.
     More reliable than os.system() on Windows — captures errors properly.
     """
+    import os as _os
+    env = _os.environ.copy()
+    # Ensure venv Scripts dir is on PATH so nnUNetv2_* CLI commands are found
+    venv_scripts = _os.path.dirname(sys.executable)
+    env['PATH'] = venv_scripts + _os.pathsep + env.get('PATH', '')
     print(f"\nRunning: {cmd}")
     result = subprocess.run(
         cmd,
         shell=True,
         stdout=sys.stdout,
         stderr=sys.stderr,
+        env=env,
     )
     return result.returncode
 
@@ -146,7 +152,7 @@ def prepare_nnunet_dataset(dataset_name, dataset_id, train_pairs,
                      .resize(size, Image.NEAREST)
             )
             mask = (mask > 127).astype(np.uint8)
-        Image.fromarray(mask * 255).save(
+        Image.fromarray(mask).save(
             str(base / 'labelsTr' / f'case_{i+1:04d}.png')
         )
         n_train += 1
@@ -190,7 +196,8 @@ def run_nnunet_train(dataset_id, cfg=None, resume=False):
 
     cmd = (
         f'nnUNetv2_train {dataset_id:03d} {cfg.config_2d} 0 '
-        f'-tr {cfg.trainer_name}'
+        f'-tr {cfg.trainer_name} '
+        f'-p {cfg.plans_name}'
     )
     if resume:
         cmd += ' --c'
@@ -214,6 +221,7 @@ def run_nnunet_predict(dataset_id, dataset_name, cfg=None):
         f'-o "{output_dir}" '
         f'-d {dataset_id:03d} '
         f'-c {cfg.config_2d} '
+        f'-p {cfg.plans_name} '
         f'-f 0 '
         f'-tr {cfg.trainer_name}'
     )
@@ -233,7 +241,7 @@ def get_ensemble_checkpoint_paths(dataset_id, dataset_name, cfg=None):
     ens_dir = os.path.join(
         Paths.NNUNET_RES,
         f'Dataset{dataset_id:03d}_{dataset_name}',
-        f'{cfg.trainer_name}__nnUNetPlans__{cfg.config_2d}',
+        f'{cfg.trainer_name}__{cfg.plans_name}__{cfg.config_2d}',
         'fold_0',
         'ensemble_checkpoints'
     )
@@ -320,9 +328,19 @@ def run_stage3(dataset_name, dataset_id, train_pairs, test_pairs,
         image_size=cfg.image_size,
     )
 
+    # Remove stale preprocessed dir so plan_and_preprocess regenerates from
+    # the new zero-shot labels rather than reusing old cached labels.
+    stale_prep = os.path.join(
+        Paths.NNUNET_PREP, f'Dataset{dataset_id:03d}_{dataset_name}'
+    )
+    if os.path.isdir(stale_prep):
+        shutil.rmtree(stale_prep)
+        print(f"Cleared stale preprocessed dir: {stale_prep}")
+
     ret = run_cmd(
         f'nnUNetv2_plan_and_preprocess '
         f'-d {dataset_id:03d} -c {cfg.config_2d} '
+        f'-pl {cfg.planner_name} '
         f'--verify_dataset_integrity'
     )
     if ret != 0:

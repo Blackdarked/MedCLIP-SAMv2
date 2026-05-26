@@ -243,12 +243,14 @@ def run_stage1(cfg=None, device='cuda'):
     for epoch in range(MAX_EPOCHS):
         # ── Train ──
         model.train()
-        train_losses = []
+        train_loss_accum = torch.zeros(1, device=device)
         for batch_idx, (images, captions) in enumerate(train_loader):
-            images = images.to(device)
-            tokens = tokenizer(list(captions)).to(device)
+            # Start H2D image transfer immediately (non-blocking),
+            # then tokenize on CPU while the transfer is in flight.
+            images = images.to(device, non_blocking=True)
+            tokens = tokenizer(list(captions)).to(device, non_blocking=True)
 
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             with torch.cuda.amp.autocast():
                 img_emb = F.normalize(model.encode_image(images), dim=-1)
                 txt_emb = F.normalize(model.encode_text(tokens),  dim=-1)
@@ -258,7 +260,7 @@ def run_stage1(cfg=None, device='cuda'):
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
-            train_losses.append(loss.item())
+            train_loss_accum += loss.detach()
 
             if batch_idx % 100 == 0:
                 print(f"  Epoch {epoch+1} | Step {batch_idx}/{len(train_loader)} "
@@ -266,21 +268,22 @@ def run_stage1(cfg=None, device='cuda'):
 
         # ── Validate ──
         model.eval()
-        val_losses = []
+        val_loss_accum = torch.zeros(1, device=device)
         with torch.no_grad():
             for images, captions in val_loader:
-                images = images.to(device)
-                tokens = tokenizer(list(captions)).to(device)
+                images = images.to(device, non_blocking=True)
+                tokens = tokenizer(list(captions)).to(device, non_blocking=True)
                 with torch.cuda.amp.autocast():
                     img_emb = F.normalize(model.encode_image(images), dim=-1)
                     txt_emb = F.normalize(model.encode_text(tokens),  dim=-1)
                     loss = dhn_nce_loss(img_emb, txt_emb,
                                          cfg.tau, cfg.beta1, cfg.beta2)
-                val_losses.append(loss.item())
+                val_loss_accum += loss.detach()
 
-        val_loss = float(np.mean(val_losses))
-        lr_now   = optimizer.param_groups[0]['lr']
-        print(f"Epoch {epoch+1} | Train {np.mean(train_losses):.4f} "
+        train_loss = (train_loss_accum / len(train_loader)).item()
+        val_loss   = (val_loss_accum   / len(val_loader)).item()
+        lr_now     = optimizer.param_groups[0]['lr']
+        print(f"Epoch {epoch+1} | Train {train_loss:.4f} "
               f"| Val {val_loss:.4f} | LR {lr_now:.2e}")
 
         if val_loss < best_val_loss:

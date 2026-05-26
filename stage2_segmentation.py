@@ -1,7 +1,7 @@
 # stage2_segmentation.py
 # Zero-shot segmentation pipeline:
 #   Fine-tuned BiomedCLIP → M2IB saliency maps
-#   → Otsu threshold + connected component analysis
+#   → KMeans (k=2) + top-K blob filter (matches paper's --postprocess kmeans --filter)
 #   → SAM prompting (bounding box or point)
 
 import os
@@ -14,9 +14,8 @@ from PIL import Image
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 import open_clip
-from skimage.filters import threshold_otsu
 from skimage.measure import label, regionprops
-from scipy.ndimage import binary_erosion
+from sklearn.cluster import KMeans
 
 from config import Paths, M2IBConfig, PostprocessConfig, SAMConfig, PROMPTS
 
@@ -132,10 +131,9 @@ class M2IBExtractor:
             for step in range(n_steps):
                 optimizer.zero_grad()
 
-                with torch.cuda.amp.autocast():
-                    img_feat = F.normalize(
-                        self.model.encode_image(image_tensor), dim=-1
-                    )
+                img_feat = F.normalize(
+                    self.model.encode_image(image_tensor), dim=-1
+                )
 
                 # Relevance term: maximize image-text cosine similarity
                 relevance = (img_feat * txt_feat).sum()
@@ -165,23 +163,25 @@ class M2IBExtractor:
 
 
 # ─────────────────────────────────────────────────────────────
-# Post-processing: Otsu + Connected Component Analysis
+# Post-processing: KMeans clustering + top-K blob filter
+# Matches original paper's postprocess_saliency_maps.py:
+#   --postprocess kmeans --filter
 # ─────────────────────────────────────────────────────────────
 
 def postprocess_saliency(saliency_map: np.ndarray,
-                          cfg: PostprocessConfig = None) -> np.ndarray:
+                          cfg: PostprocessConfig = None,
+                          top_k: int = 3) -> np.ndarray:
     """
     Convert continuous saliency map to binary coarse segmentation mask.
 
-    Step 1: Otsu threshold → binary map
-    Step 2: Connected component analysis → keep high-confidence components
-
-    Confidence(c) = Σ_{i∈c} p_i * ŷ_i / Σ_{i∈c} ŷ_i
-    where p_i = saliency value, ŷ_i = binary label for pixel i.
+    Step 1: KMeans (k=2) on pixel values → foreground = cluster with
+            higher centroid (background cluster has lower mean saliency)
+    Step 2: Keep the top-k largest connected components (--filter flag)
 
     Args:
         saliency_map : (H, W) float32 in [0, 1]
-        cfg          : PostprocessConfig
+        cfg          : PostprocessConfig (min_area used for small-blob rejection)
+        top_k        : maximum number of largest blobs to retain
 
     Returns:
         binary mask  : (H, W) uint8
@@ -192,24 +192,25 @@ def postprocess_saliency(saliency_map: np.ndarray,
     if saliency_map.max() == saliency_map.min():
         return np.zeros_like(saliency_map, dtype=np.uint8)
 
-    # Otsu threshold
-    thresh = threshold_otsu(saliency_map)
-    binary = (saliency_map >= thresh).astype(np.uint8)
+    # KMeans 2-cluster on flattened saliency values
+    flat = saliency_map.reshape(-1, 1).astype(np.float32)
+    km = KMeans(n_clusters=2, n_init=3, random_state=0)
+    labels = km.fit_predict(flat).reshape(saliency_map.shape)
 
-    # Connected component analysis
-    labeled  = label(binary)
-    regions  = regionprops(labeled, intensity_image=saliency_map)
-    final    = np.zeros_like(binary)
+    # Foreground = cluster with higher centroid
+    fg_label = int(np.argmax(km.cluster_centers_[:, 0]))
+    binary = (labels == fg_label).astype(np.uint8)
 
+    # Top-K largest blobs filter
+    labeled = label(binary)
+    regions = regionprops(labeled)
+    regions = [r for r in regions if r.area >= cfg.min_area]
+    regions = sorted(regions, key=lambda r: r.area, reverse=True)[:top_k]
+
+    final = np.zeros_like(binary)
     for region in regions:
-        if region.area < cfg.min_area:
-            continue
         y, x = region.coords[:, 0], region.coords[:, 1]
-        probs = saliency_map[y, x]
-        labels_here = binary[y, x]
-        confidence = (probs * labels_here).sum() / (labels_here.sum() + 1e-8)
-        if confidence > cfg.confidence_threshold:
-            final[y, x] = 1
+        final[y, x] = 1
 
     return final
 
@@ -245,8 +246,6 @@ def load_sam(sam_cfg: SAMConfig = None, device: str = 'cuda'):
     if sam_cfg is None:
         sam_cfg = SAMConfig()
     sam = sam_model_registry[sam_cfg.model_type](checkpoint=Paths.SAM_CKPT)
-    if sam_cfg.use_fp16:
-        sam = sam.half()
     sam = sam.to(device)
     return SamPredictor(sam), sam
 
@@ -310,6 +309,86 @@ def load_masks(path: str) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────
+def _remap_hf_visual_to_openclip(hf_sd: dict) -> dict:
+    """Convert HuggingFace CLIP visual encoder keys to open_clip CustomTextCLIP keys.
+
+    The authors' pytorch_model.bin was saved from a HF CLIPModel, whose visual
+    encoder has different key names and stores q/k/v as separate projections.
+    open_clip's timm ViT uses merged qkv and a different naming convention.
+    Only visual keys are converted; text keys are intentionally omitted so the
+    caller can load with strict=False and keep the pretrained text encoder.
+    """
+    import re
+    new_sd = {}
+
+    # cls token: HF shape [dim] → timm shape [1, 1, dim]
+    if 'vision_model.embeddings.class_embedding' in hf_sd:
+        new_sd['visual.trunk.cls_token'] = (
+            hf_sd['vision_model.embeddings.class_embedding'].unsqueeze(0).unsqueeze(0)
+        )
+
+    # position embedding: HF shape [seq, dim] → timm shape [1, seq, dim]
+    if 'vision_model.embeddings.position_embedding.weight' in hf_sd:
+        new_sd['visual.trunk.pos_embed'] = (
+            hf_sd['vision_model.embeddings.position_embedding.weight'].unsqueeze(0)
+        )
+
+    # patch projection
+    for sfx in ('weight', 'bias'):
+        k = f'vision_model.embeddings.patch_embedding.{sfx}'
+        if k in hf_sd:
+            new_sd[f'visual.trunk.patch_embed.proj.{sfx}'] = hf_sd[k]
+
+    # transformer blocks
+    block_ids = sorted({
+        int(m.group(1))
+        for k in hf_sd
+        if (m := re.match(r'vision_model\.encoder\.layers\.(\d+)\.', k))
+    })
+    for i in block_ids:
+        src = f'vision_model.encoder.layers.{i}'
+        dst = f'visual.trunk.blocks.{i}'
+
+        # layer norms
+        for s_norm, d_norm in [('layer_norm1', 'norm1'), ('layer_norm2', 'norm2')]:
+            for sfx in ('weight', 'bias'):
+                k = f'{src}.{s_norm}.{sfx}'
+                if k in hf_sd:
+                    new_sd[f'{dst}.{d_norm}.{sfx}'] = hf_sd[k]
+
+        # merge separate q, k, v → single qkv
+        for sfx in ('weight', 'bias'):
+            parts = [hf_sd.get(f'{src}.self_attn.{p}_proj.{sfx}') for p in ('q', 'k', 'v')]
+            if all(p is not None for p in parts):
+                new_sd[f'{dst}.attn.qkv.{sfx}'] = torch.cat(parts, dim=0)
+
+        # output projection
+        for sfx in ('weight', 'bias'):
+            k = f'{src}.self_attn.out_proj.{sfx}'
+            if k in hf_sd:
+                new_sd[f'{dst}.attn.proj.{sfx}'] = hf_sd[k]
+
+        # MLP
+        for fc in ('fc1', 'fc2'):
+            for sfx in ('weight', 'bias'):
+                k = f'{src}.mlp.{fc}.{sfx}'
+                if k in hf_sd:
+                    new_sd[f'{dst}.mlp.{fc}.{sfx}'] = hf_sd[k]
+
+    # final layer norm
+    for sfx in ('weight', 'bias'):
+        k = f'vision_model.post_layernorm.{sfx}'
+        if k in hf_sd:
+            new_sd[f'visual.trunk.norm.{sfx}'] = hf_sd[k]
+
+    # visual projection head
+    if 'visual_projection.weight' in hf_sd:
+        new_sd['visual.head.proj.weight'] = hf_sd['visual_projection.weight']
+
+    return new_sd
+
+
+# ─────────────────────────────────────────────────────────────
 # Full Stage 2 runner — one dataset at a time
 # ─────────────────────────────────────────────────────────────
 
@@ -360,10 +439,24 @@ def run_stage2(dataset_name: str,
     )
 
     if not use_pretrained and os.path.exists(Paths.BIOMEDCLIP_FT):
-        biomedclip.load_state_dict(
-            torch.load(Paths.BIOMEDCLIP_FT, map_location=device)
-        )
-        print("  Fine-tuned weights loaded")
+        ckpt = torch.load(Paths.BIOMEDCLIP_FT, map_location=device, weights_only=False)
+        if isinstance(ckpt, dict):
+            ckpt = (ckpt.get('state_dict')
+                    or ckpt.get('model_state_dict')
+                    or ckpt.get('model')
+                    or ckpt)
+        if isinstance(ckpt, dict) and 'vision_model.embeddings.class_embedding' in ckpt:
+            # Checkpoint is in HuggingFace CLIP format; remap visual keys to open_clip.
+            # Text encoder is architecturally incompatible (HF pre-norm vs BERT post-norm)
+            # so pretrained text weights are kept.
+            visual_sd = _remap_hf_visual_to_openclip(ckpt)
+            missing, unexpected = biomedclip.load_state_dict(visual_sd, strict=False)
+            visual_loaded = sum(1 for k in visual_sd if k not in missing)
+            print(f"  Visual encoder loaded from HF checkpoint ({visual_loaded} keys).")
+            print(f"  Text encoder uses pretrained weights (HF/open_clip architecture mismatch).")
+        else:
+            biomedclip.load_state_dict(ckpt)
+            print("  Fine-tuned weights loaded")
     else:
         print("  Using pre-trained weights (Stage 1 not run)")
 
@@ -390,8 +483,7 @@ def run_stage2(dataset_name: str,
             prompt = PROMPTS.get(prompt_key, PROMPTS.get(dataset_name, ''))
             tokens = tokenizer([prompt]).to(device)
 
-            with torch.cuda.amp.autocast():
-                saliency = extractor.extract(img_t, tokens, n_steps=n_steps)
+            saliency = extractor.extract(img_t, tokens, n_steps=n_steps)
 
             coarse = postprocess_saliency(saliency, pp_cfg)
             coarse_masks[img_path] = coarse
@@ -418,8 +510,9 @@ def run_stage2(dataset_name: str,
     del biomedclip, extractor, tokenizer
     gc.collect()
     torch.cuda.empty_cache()
-    free_gb = torch.cuda.mem_get_info()[0] / 1e9
-    print(f"  GPU freed. Available: {free_gb:.1f} GB")
+    if torch.cuda.is_available():
+        free_gb = torch.cuda.mem_get_info()[0] / 1e9
+        print(f"  GPU freed. Available: {free_gb:.1f} GB")
 
     # ── Step 3: SAM refinement ──
     print(f"[Stage 2 / {dataset_name}] Running SAM...")
@@ -436,6 +529,15 @@ def run_stage2(dataset_name: str,
         coarse = coarse_masks.get(img_path, np.zeros((224, 224), dtype=np.uint8))
         try:
             img_np = np.array(Image.open(img_path).convert('RGB'))
+            h_orig, w_orig = img_np.shape[:2]
+            h_c, w_c = coarse.shape
+            if (h_c, w_c) != (h_orig, w_orig):
+                # M2IB runs on 224×224 preprocessed images; SAM needs coordinates
+                # in original image space — scale the coarse mask up first.
+                coarse = (np.array(
+                    Image.fromarray((coarse * 255).astype(np.uint8))
+                    .resize((w_orig, h_orig), Image.NEAREST)
+                ) > 127).astype(np.uint8)
             predictor.set_image(img_np)
             refined = refine_with_sam(
                 predictor, img_np, coarse,

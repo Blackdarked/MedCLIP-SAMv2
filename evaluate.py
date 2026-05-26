@@ -212,7 +212,7 @@ def load_predictions_from_dir(pred_dir:   str,
         if mask_path is None or not os.path.exists(mask_path):
             continue
 
-        pred = (np.array(Image.open(pred_path).convert('L')) > 127).astype(np.uint8)
+        pred = (np.array(Image.open(pred_path).convert('L')) > 0).astype(np.uint8)
         gt   = np.array(
             Image.open(mask_path).convert('L').resize(
                 (pred.shape[1], pred.shape[0]), Image.NEAREST

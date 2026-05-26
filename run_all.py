@@ -10,12 +10,14 @@ import sys
 import gc
 import json
 import glob
+import shutil
 import argparse
 import pickle
 import numpy as np
 import torch
 from pathlib import Path
 from typing import Dict, List
+from PIL import Image
 
 from config import (
     Paths, Stage1Config, M2IBConfig, PostprocessConfig,
@@ -44,15 +46,15 @@ from evaluate import (
 
 DATASET_REGISTRY = {
     'breast': {
-        'loader':      load_breast,
-        'loader_args': {'busi_dir': None},
+        'loader': load_breast,
+        'loader_args': {'breast_dir': None},
         'nnunet_name': 'Breast',
         'nnunet_id':   1,
         'large':       False,
     },
     'brain': {
         'loader':      load_brain,
-        'loader_args': {'brain_dir': None},
+        'loader_args': {'brain_dir': None},   # unchanged
         'nnunet_name': 'Brain',
         'nnunet_id':   2,
         'large':       False,
@@ -74,10 +76,10 @@ DATASET_REGISTRY = {
 }
 
 def fill_loader_args():
-    DATASET_REGISTRY['breast']['loader_args'] = {'busi_dir': Paths.BUSI_DIR}
-    DATASET_REGISTRY['brain']['loader_args']  = {'brain_dir': Paths.BRAIN_DIR}
-    DATASET_REGISTRY['xray']['loader_args']   = {'xray_dir': Paths.XRAY_DIR}
-    DATASET_REGISTRY['ct']['loader_args']     = {'ct_dir': Paths.CT_DIR}
+    DATASET_REGISTRY['breast']['loader_args'] = {'breast_dir': Paths.BREAST_DIR}
+    DATASET_REGISTRY['brain']['loader_args']  = {'brain_dir':  Paths.BRAIN_DIR}
+    DATASET_REGISTRY['xray']['loader_args']   = {'xray_dir':   Paths.XRAY_DIR}
+    DATASET_REGISTRY['ct']['loader_args']     = {'ct_dir':     Paths.CT_DIR}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -109,6 +111,7 @@ def main(args):
     if DEVICE == 'cuda':
         print(f"GPU:  {torch.cuda.get_device_name(0)}")
         print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+        torch.backends.cudnn.benchmark = True   # fixed 224×224 inputs → safe to enable
     print()
 
     Paths.makedirs()
@@ -116,6 +119,11 @@ def main(args):
     results = load_results()
     datasets_to_run = ([args.dataset] if args.dataset
                        else list(DATASET_REGISTRY.keys()))
+
+    # In-memory aggregates (full evaluate_pairs dicts with dsc_list/nsd_list
+    # for t-tests and correct print_table1 keys)
+    zs_agg: Dict[str, dict] = {}
+    ws_agg: Dict[str, dict] = {}
 
     # ── Stage 1 ──
     if not args.skip_stage1 and not args.eval_only:
@@ -179,9 +187,9 @@ def main(args):
                 test_preds.append(pred)
                 test_gts.append(gt)
 
-            from PIL import Image
             if test_preds:
                 zs = evaluate_pairs(test_preds, test_gts)
+                zs_agg[ds_name] = zs
                 results.setdefault(ds_name, {}).update({
                     'zs_dsc': zs['dsc_mean'], 'zs_dsc_std': zs['dsc_std'],
                     'zs_nsd': zs['nsd_mean'], 'zs_nsd_std': zs['nsd_std'],
@@ -222,6 +230,7 @@ def main(args):
             ws_preds, ws_gts = load_predictions_from_dir(pred_dir, test_pairs)
             if ws_preds:
                 ws = evaluate_pairs(ws_preds, ws_gts)
+                ws_agg[ds_name] = ws
                 results.setdefault(ds_name, {}).update({
                     'ws_dsc': ws['dsc_mean'], 'ws_dsc_std': ws['dsc_std'],
                     'ws_nsd': ws['nsd_mean'], 'ws_nsd_std': ws['nsd_std'],
@@ -241,7 +250,23 @@ def main(args):
     print("=" * 60)
     if 'roco' in results:
         print_table2(results['roco'])
-    print_table1({ds: results.get(ds, {}) for ds in ['breast', 'brain', 'xray', 'ct']})
+
+    # Rebuild from JSON for any datasets computed in a previous run
+    for ds in ['breast', 'brain', 'xray', 'ct']:
+        r = results.get(ds, {})
+        if ds not in zs_agg and 'zs_dsc' in r:
+            zs_agg[ds] = {
+                'dsc_mean': r['zs_dsc'], 'dsc_std': r.get('zs_dsc_std', 0),
+                'nsd_mean': r['zs_nsd'], 'nsd_std': r.get('zs_nsd_std', 0),
+            }
+        if ds not in ws_agg and 'ws_dsc' in r:
+            ws_agg[ds] = {
+                'dsc_mean': r['ws_dsc'], 'dsc_std': r.get('ws_dsc_std', 0),
+                'nsd_mean': r['ws_nsd'], 'nsd_std': r.get('ws_nsd_std', 0),
+            }
+
+    if zs_agg or ws_agg:
+        print_table1(zs_agg, ws_agg)
     if results.get('ablation'):
         print_table4(results['ablation'])
 
@@ -255,6 +280,43 @@ def main(args):
 # ALL execution must be inside this block.
 # ─────────────────────────────────────────────────────────────
 
+def reset_caches(dataset: str = None):
+    """
+    Delete cached outputs so the pipeline reruns from scratch.
+
+    If dataset is given, only clear that dataset's masks and nnunet dirs.
+    Otherwise clear everything (all datasets + Stage 1 checkpoint).
+    """
+    datasets = [dataset] if dataset else ['breast', 'brain', 'xray', 'ct']
+    registry = {
+        'breast': 'Breast', 'brain': 'Brain',
+        'xray': 'LungXray', 'ct': 'LungCT',
+    }
+
+    for ds in datasets:
+        mask_dir = os.path.join(Paths.MASK_DIR, ds)
+        for pkl in glob.glob(os.path.join(mask_dir, '*.pkl')):
+            os.remove(pkl)
+            print(f"  Removed: {pkl}")
+
+        nn_name = registry[ds]
+        for root_dir in [Paths.NNUNET_RAW, Paths.NNUNET_PREP, Paths.NNUNET_RES]:
+            for pattern in [f'Dataset*_{nn_name}', f'Dataset*_{nn_name}__*']:
+                for d in glob.glob(os.path.join(root_dir, pattern)):
+                    shutil.rmtree(d, ignore_errors=True)
+                    print(f"  Removed: {d}")
+
+    if not dataset:
+        if os.path.exists(Paths.BIOMEDCLIP_FT):
+            os.remove(Paths.BIOMEDCLIP_FT)
+            print(f"  Removed: {Paths.BIOMEDCLIP_FT}")
+        if os.path.exists(RESULTS_PATH):
+            os.remove(RESULTS_PATH)
+            print(f"  Removed: {RESULTS_PATH}")
+
+    print("Reset complete.\n")
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='MedCLIP-SAMv2 replication')
     parser.add_argument('--skip-stage1', action='store_true')
@@ -262,7 +324,16 @@ if __name__ == '__main__':
                         choices=['breast', 'brain', 'xray', 'ct'], default=None)
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--eval-only', action='store_true')
+    parser.add_argument('--reset', action='store_true',
+                        help='Delete cached masks/nnunet data before running. '
+                             'Combined with --dataset, only clears that dataset.')
     args = parser.parse_args()
+
+    if args.reset:
+        fill_loader_args()
+        print(f"Resetting caches "
+              f"({'dataset: ' + args.dataset if args.dataset else 'all datasets + Stage 1'})...")
+        reset_caches(args.dataset)
 
     print("MedCLIP-SAMv2 — Local Machine")
     print(f"  Dataset:     {args.dataset or 'all'}")
