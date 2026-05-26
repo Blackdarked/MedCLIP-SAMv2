@@ -1,0 +1,412 @@
+\documentclass[conference]{IEEEtran}
+% BẮT BUỘC XeLaTeX. Overleaf: Menu → Settings → Compiler → XeLaTeX
+
+\usepackage{array}
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+\setmonofont{Courier New}
+
+\usepackage[vietnamese]{babel}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{subcaption}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{adjustbox}
+
+\graphicspath{{images/}}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!10},
+  captionpos=b
+}
+
+\begin{document}
+
+\title{Tái hiện MedCLIP-SAMv2: Phân đoạn ảnh y khoa theo văn bản trong điều kiện tài nguyên hạn chế}
+
+\author{
+    \IEEEauthorblockN{
+        \begin{tabular}{c @{\hspace{0.8cm}} c @{\hspace{0.8cm}} c}
+            \begin{tabular}[t]{l}
+                \textbf{1. Thiều Đinh Nam Tài} \\
+                \textit{MSSV: 23521378}
+            \end{tabular} &
+            \begin{tabular}[t]{l}
+                \textbf{2. Huỳnh Thị Anh Thư} \\
+                \textit{MSSV: 23521535}
+            \end{tabular} &
+            \begin{tabular}[t]{l}
+                \textbf{3. Nguyễn Lan Hương} \\
+                \textit{MSSV: 23520588}
+            \end{tabular}
+        \end{tabular}
+        \vspace{0.2cm}
+        \begin{tabular}{c}
+            \begin{tabular}[t]{l}
+                \textbf{4. Nguyễn Trung Duy} \\
+                \textit{MSSV: 22520335}
+            \end{tabular}
+        \end{tabular}
+    }
+    \vspace{0.5cm}
+    \IEEEauthorblockN{\textbf{Giảng viên hướng dẫn:} ThS. Dương Phi Long; KS. Phạm Nguyễn Thanh Bình}
+    \vspace{0.2cm}
+    \IEEEauthorblockA{
+        \textit{Trường Đại học Công nghệ Thông tin}\\
+        Đại học Quốc gia TP.HCM, Việt Nam
+    }
+}
+
+\maketitle
+\thispagestyle{plain}
+\pagestyle{plain}
+
+\begin{abstract}
+Báo cáo trình bày việc tái hiện framework \textbf{MedCLIP-SAMv2} (Koleilat \textit{et al.}, arXiv:2409.19483)---phân đoạn ảnh y khoa đa phương thức chỉ bằng mô tả văn bản lâm sàng, kết hợp fine-tune BiomedCLIP (DHN-NCE), saliency M2IB, Segment Anything Model (SAM) và huấn luyện yếu giám sát nnUNet với ensemble checkpoint. Nhóm triển khai pipeline ba giai đoạn trên Windows, GPU RTX 4060 Ti 16\,GB, bốn bộ dữ liệu (siêu âm vú, MRI não, X-quang và CT phổi), so sánh DSC/NSD với bài báo gốc. Kết quả tái hiện cho thấy X-quang đạt DSC zero-shot khoảng 50\% (bài báo $\sim$76\%), các modality còn lại $\sim$5--9\%; phân tích nguyên nhân và trực quan hóa được trình bày theo cấu trúc: bài toán, phương pháp, thực nghiệm (gốc / tái hiện / mở rộng).
+\end{abstract}
+
+\begin{IEEEkeywords}
+Medical Image Segmentation, MedCLIP-SAMv2, BiomedCLIP, SAM, M2IB, nnUNet, Zero-Shot, Weakly Supervised Learning
+\end{IEEEkeywords}
+
+%==============================================================================
+\section{Giới thiệu}
+%==============================================================================
+
+\subsection{Bài toán cần giải quyết}
+\textbf{Phân đoạn ảnh y khoa} (medical image segmentation) là bài toán gán nhãn từng pixel cho cơ quan hoặc tổn thương trên ảnh lâm sàng (MRI, CT, X-quang, siêu âm). Đây là bước nền tảng cho đo thể tích khối u, lập kế hoạch phẫu thuật/xạ trị và hệ thống hỗ trợ chẩn đoán.
+
+Bài toán đồ án tập trung vào \textbf{phân đoạn theo văn bản} (\textit{text-driven segmentation}): người dùng (bác sĩ) đưa vào mô tả ngôn ngữ tự nhiên, ví dụ \textit{``lungs''} hoặc mô tả u vú ác tính, và hệ thống tự động sinh mask vùng quan tâm---\textbf{không cần nhãn pixel} trong giai đoạn suy luận (zero-shot), hoặc chỉ cần nhãn giả yếu để tinh chỉnh (weakly supervised).
+
+Cụ thể, nhóm tái hiện bài báo \textbf{MedCLIP-SAMv2}~\cite{koleilat2024medclipsamv2}, đánh giá trên bốn tác vụ:
+\begin{itemize}
+    \item Phân đoạn u vú trên siêu âm (BUSI + UDIAT);
+    \item Phân đoạn khối u não trên MRI T1;
+    \item Phân đoạn phổi trên X-quang ngực;
+    \item Phân đoạn phổi trên CT (bệnh xơ phổi).
+\end{itemize}
+
+\subsection{Khó khăn và thách thức}
+\begin{enumerate}
+    \item \textbf{Khan hiếm nhãn pixel:} Gán nhãn bởi chuyên gia tốn thời gian; dataset y khoa nhỏ hơn nhiều so với ảnh tự nhiên.
+    \item \textbf{Đa modality, đa quy mô:} U vú/não là cấu trúc nhỏ, tinh vi; phổi trên X-quang/CT chiếm vùng lớn---cùng một pipeline khó hoạt động đồng đều.
+    \item \textbf{Miền ngôn ngữ y khoa:} CLIP tổng quát kém trên thuật ngữ lâm sàng; cần BiomedCLIP và fine-tune phù hợp.
+    \item \textbf{Liên kết văn bản--pixel:} CLIP học chủ yếu ở mức toàn ảnh; cần M2IB (hoặc CAM) để có saliency cục bộ.
+    \item \textbf{Phụ thuộc prompt SAM:} SAM cần hộp/điểm; phải chuyển saliency thành prompt hình học chính xác.
+    \item \textbf{Tái hiện thực nghiệm:} Pipeline dài (3 giai đoạn), nhiều checkpoint, nnUNet 600 epoch trên bài báo---khó trên GPU 16\,GB và thời gian đồ án.
+\end{enumerate}
+
+\subsection{Ý tưởng đề xuất của MedCLIP-SAMv2}
+Bài báo gốc giải quyết các thách thức trên bằng pipeline ba giai đoạn (Hình~\ref{fig:pipeline}):
+
+\textbf{(1) Fine-tune BiomedCLIP với DHN-NCE:} Loss đối chiếu ảnh--văn bản ưu tiên negative ``khó'', phù hợp batch nhỏ và sự khác biệt tinh tế trên ảnh y khoa.
+
+\textbf{(2) Zero-shot segmentation:} Ảnh + prompt $\rightarrow$ M2IB sinh saliency $\rightarrow$ Otsu/KMeans + lọc vùng liên thông $\rightarrow$ SAM (bbox hoặc điểm) sinh mask cuối.
+
+\textbf{(3) Weakly supervised refinement:} Dùng mask zero-shot làm nhãn giả huấn luyện nnUNet; lịch học cyclical + lưu 30 checkpoint, ensemble softmax và ước lượng uncertainty (entropy).
+
+So với MedCLIP-SAM (MICCAI 2024), phiên bản v2 thay gScoreCAM bằng \textbf{M2IB}, mở rộng sang CT phổi, tối ưu prompt (kể cả LLM) và ablation đầy đủ hơn; báo cáo tăng DSC trung bình $\sim$13\% (zero-shot) và $\sim$11\% (weakly supervised) so với bản trước.
+
+\subsection{Mục tiêu và phạm vi đồ án}
+\textbf{Mục tiêu:} (i) Triển khai mã nguồn pipeline; (ii) chạy thực nghiệm trên bốn dataset; (iii) so sánh với Table~1--2 bài báo; (iv) phân tích sai lệch tái hiện.
+
+\textbf{Phạm vi:} Tái hiện (reproduction), không đề xuất kiến trúc mới; prompt tiếng Anh theo mã tác giả; giảm epoch/iter nnUNet so với bài báo.
+
+%==============================================================================
+\section{Phương pháp thực hiện}
+%==============================================================================
+
+\subsection{Tổng quan framework}
+MedCLIP-SAMv2~\cite{koleilat2024medclipsamv2} gồm ba giai đoạn nối tiếp (Hình~\ref{fig:pipeline}). Đồ án triển khai tương ứng các module \texttt{stage1\_finetune.py}, \texttt{stage2\_segmentation.py}, \texttt{stage3\_nnunet.py} trong repository dự án.
+
+\begin{figure*}[t]
+\centering
+\fbox{\parbox{0.96\textwidth}{\centering\vspace{1.2cm}
+\textbf{Stage 1:} MedPix~2.0 + ROCO $\rightarrow$ BiomedCLIP + \textbf{DHN-NCE} (fine-tune)\\
+\vspace{0.3cm}
+\textbf{Stage 2:} Ảnh test + \textit{text prompt} $\rightarrow$ \textbf{M2IB} saliency $\rightarrow$ hậu xử lý (KMeans, lọc blob) $\rightarrow$ \textbf{SAM ViT-H} $\rightarrow$ mask zero-shot\\
+\vspace{0.3cm}
+\textbf{Stage 3:} Nhãn giả $\rightarrow$ \textbf{nnUNet} + cyclical LR + ensemble 30 checkpoint $\rightarrow$ mask + uncertainty map
+\vspace{1.2cm}}}
+\caption{Tổng quan MedCLIP-SAMv2 (theo Fig.~3, Koleilat \textit{et al.}, 2024). Đồ án tái hiện đủ ba giai đoạn.}
+\label{fig:pipeline}
+\end{figure*}
+
+\subsection{Giai đoạn 1: Fine-tune BiomedCLIP (DHN-NCE)}
+\textbf{Dữ liệu:} MedPix~2.0 (caption $\geq$ 20 ký tự), chia 85/15 train/val; đánh giá retrieval trên ROCO~\cite{pelka2018roco}.
+
+\textbf{Mô hình:} \texttt{hf-hub:microsoft/BiomedCLIP-PubMedBERT\_256-vit\_base\_patch16\_224}.
+
+\textbf{Loss DHN-NCE} (Eq.~9--13 bài báo): với similarity đã chia nhiệt độ $\tau=0.6$, trọng số negative:
+\begin{equation}
+W^{v \rightarrow t}_{ij} = (B-1) \frac{\exp(\beta_1 I_i T_j / \tau)}{\sum_{k \neq i} \exp(\beta_1 I_i T_k / \tau)}, \quad \beta_1=\beta_2=0.15
+\end{equation}
+
+\textbf{Huấn luyện:} LR $10^{-6}$, batch 64, StepLR $\gamma=0.5$/epoch, early stopping. Đồ án sửa lỗi exponent hardness trong mã (dùng $I \cdot T/\tau$ đúng Eq.~12).
+
+\subsection{Giai đoạn 2: Zero-shot segmentation (M2IB + SAM)}
+\textbf{M2IB}~\cite{wang2023m2ib}: Tối ưu mask $\lambda \in [0,1]^{H \times W}$ trên token ViT (lớp $l=7$), cân bằng mutual information ảnh--văn bản và nén thông tin thừa ($\beta=0.3$, 300 bước tối ưu/ảnh trong tái hiện).
+
+\textbf{Hậu xử lý:} KMeans $k=2$ trên saliency, giữ các vùng liên thông có confidence cao (tương đương connected-component filtering trên bài báo).
+
+\textbf{SAM}~\cite{kirillov2023sam}: ViT-H; prompt theo modality---\textbf{bbox} (vú, não, CT), \textbf{10 điểm} (X-quang). Prompt mẫu trong \texttt{config.PROMPTS}.
+
+\subsection{Giai đoạn 3: nnUNet yếu giám sát}
+Mask zero-shot làm pseudo-label; huấn luyện nnUNet v2~\cite{isensee2021nnunet} với trainer \texttt{nnUNetTrainerCyclicalLR}~\cite{zhao2022bayesian}:
+\begin{itemize}
+    \item Bài báo: 3 chu kỳ $\times$ 200 epoch, 250 iter/epoch, 10 checkpoint/chu kỳ (30 tổng).
+    \item Tái hiện: 1 chu kỳ $\times$ 200 epoch, 50 iter/epoch (RTX 4060 Ti, giới hạn thời gian).
+\end{itemize}
+Dự đoán cuối: trung bình softmax ensemble; uncertainty = entropy theo pixel.
+
+\subsection{Dữ liệu và triển khai}
+\begin{table}[htbp]
+\caption{Bộ dữ liệu phân đoạn (theo bài báo Sec.~3.4.2)}
+\label{tab:datasets}
+\centering
+\small
+\begin{tabular}{llr}
+\toprule
+\textbf{Tác vụ} & \textbf{Nguồn} & \textbf{Test} \\
+\midrule
+Siêu âm vú & BUSI train + UDIAT val/test & 113 \\
+MRI não & Brain Tumor (Cheng, 2017) & 600 \\
+X-quang phổi & COVID-QU-Ex & 957 \\
+CT phổi & Konya (2020), chia theo patient & 1800 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Chỉ số:} DSC và NSD ($\tau=2$ pixel)~\cite{ma2023medsam}; cột \textit{All} gộp toàn bộ ảnh test (3470 mẫu). Paired $t$-test giữa zero-shot và weakly supervised ($p<0.05$).
+
+\textbf{Môi trường:} Python 3.11, PyTorch CUDA 12.1, \texttt{open\_clip\_torch}, SAM, \texttt{nnunetv2}; Windows 11, RTX 4060 Ti 16\,GB.
+
+%==============================================================================
+\section{Thực nghiệm}
+%==============================================================================
+
+\subsection{Thiết lập thực nghiệm}
+Nhóm chạy pipeline end-to-end (\texttt{run\_all.py}): Stage~1 (fine-tune hoặc checkpoint tác giả), Stage~2 sinh mask zero-shot, Stage~3 chuyển định dạng nnUNet và huấn luyện, \texttt{evaluate.py} tính DSC/NSD, \texttt{visualize.py} xuất hình minh họa.
+
+\subsection{Kết quả bài báo gốc}
+Bảng~\ref{tab:paper_main} trích dòng \textit{Ours} (MedCLIP-SAMv2) trong Table~1 bài báo~\cite{koleilat2024medclipsamv2}. Zero-shot đạt DSC trung bình \textbf{77.61\%}, weakly supervised \textbf{82.11\%}, vượt MedCLIP-SAM và các phương pháp zero-shot khác ($p<0.05$ trên hầu hết modality).
+
+\begin{table*}[htbp]
+\caption{Kết quả MedCLIP-SAMv2 trên bài báo gốc (Table~1, DSC/NSD \%, mean$\pm$std)}
+\label{tab:paper_main}
+\centering
+\small
+\begin{tabular}{l|cc|cc|cc|cc|cc}
+\toprule
+ & \multicolumn{2}{c|}{\textbf{Vú (US)}} & \multicolumn{2}{c|}{\textbf{Não (MRI)}} & \multicolumn{2}{c|}{\textbf{X-quang}} & \multicolumn{2}{c|}{\textbf{CT phổi}} & \multicolumn{2}{c}{\textbf{All}} \\
+ & DSC & NSD & DSC & NSD & DSC & NSD & DSC & NSD & DSC & NSD \\
+\midrule
+Zero-shot & 77.76 & 81.11 & 76.52 & 82.23 & 75.79 & 80.88 & 80.38 & 82.03 & 77.61 & 81.56 \\
+Weakly sup. & 78.87 & 84.58 & 80.03 & 88.25 & 80.77 & 84.53 & 88.78 & 91.95 & 82.11 & 87.33 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+Bảng~\ref{tab:paper_roco} (Table~2 bài báo): fine-tune DHN-NCE đạt Top-1 I$\rightarrow$T \textbf{84.70\%}, T$\rightarrow$I \textbf{85.99\%}, cao hơn InfoNCE/DCL/HN-NCE.
+
+\begin{table}[htbp]
+\caption{Retrieval ROCO trên bài báo (Table~2, Top-1 \%)}
+\label{tab:paper_roco}
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+\textbf{Mô hình} & I$\rightarrow$T & T$\rightarrow$I \\
+\midrule
+BiomedCLIP (pre-trained) & 81.83 & 81.36 \\
+BiomedCLIP + DHN-NCE (bài báo) & \textbf{84.70} & \textbf{85.99} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Bài báo còn báo cáo ablation (Table~4): từ saliency thuần (DSC 46.23\%) đến +SAM (77.61\%) và +nnUNet ensemble (82.11\%). Hình chất lượng định tính (Fig.~4 bài gốc) cho thấy weakly supervised sửa mask coarse, kèm uncertainty map.
+
+\subsection{Kết quả tái hiện (reproduced)}
+Bảng~\ref{tab:repro} so sánh trực tiếp với bài báo. Số liệu ``Tái hiện'' từ chạy pipeline cục bộ (README dự án).
+
+\begin{table*}[htbp]
+\caption{So sánh DSC (\%) mean --- bài báo \textit{vs.} tái hiện}
+\label{tab:repro}
+\centering
+\small
+\begin{tabular}{l|cc|cc|cc|cc|cc}
+\toprule
+ & \multicolumn{2}{c|}{\textbf{Vú}} & \multicolumn{2}{c|}{\textbf{Não}} & \multicolumn{2}{c|}{\textbf{X-quang}} & \multicolumn{2}{c|}{\textbf{CT}} & \multicolumn{2}{c}{\textbf{Trung bình}} \\
+\textbf{Phương pháp} & Báo & Ta & Báo & Ta & Báo & Ta & Báo & Ta & Báo & Ta \\
+\midrule
+Zero-shot & 77.76 & 5.17 & 76.52 & 4.86 & 75.79 & \textbf{50.01} & 80.38 & 7.93 & 77.61 & $\sim$17 \\
+Weakly sup. & 78.87 & 5.61 & 80.03 & 5.01 & 80.77 & \textbf{49.62} & 88.78 & 9.04 & 82.11 & $\sim$17 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\textbf{Nhận xét tái hiện:}
+\begin{itemize}
+    \item \textbf{X-quang:} DSC $\sim$50\% --- modality duy nhất có overlap phổi đáng kể (Hình~\ref{fig:xray_summary},~\ref{fig:xray_sample}), nhưng vẫn thấp hơn $\sim$26 điểm phần trăm so với bài báo.
+    \item \textbf{Vú, não, CT:} DSC $\sim$5--9\% --- saliency/SAM phủ sai hoặc gần toàn ảnh (Hình~\ref{fig:brain_fail},~\ref{fig:ct_sample}).
+    \item \textbf{nnUNet:} Không cải thiện so với zero-shot do nhãn giả kém (``garbage in, garbage out'').
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{brain_sample_0001.png}
+\caption{Tái hiện --- MRI não (mẫu đơn): GT (xanh) vs.\ dự đoán phủ rộng, DSC $\approx$ 4\%.}
+\label{fig:brain_fail}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{xray_sample_0001.png}
+\caption{Tái hiện --- X-quang (mẫu đơn): có overlap phổi một phần.}
+\label{fig:xray_sample}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{ct_sample.png}
+\caption{Tái hiện --- CT phổi (mẫu đơn).}
+\label{fig:ct_sample}
+\end{figure}
+
+\subsection{Kết quả mở rộng và phân tích}
+\subsubsection{Trực quan hóa theo modality (10 mẫu tốt/xấu nhất)}
+Tương tự Fig.~4 bài gốc, nhóm xuất lưới 10 ca DSC cao nhất / thấp nhất mỗi dataset (\texttt{visualize.py --summary}).
+
+\begin{figure*}[htbp]
+\centering
+\begin{subfigure}[b]{0.48\textwidth}
+    \includegraphics[width=\linewidth]{xray_summary_best.png}
+    \caption{X-quang --- 10 DSC cao nhất}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.48\textwidth}
+    \includegraphics[width=\linewidth]{xray_summary_worst.png}
+    \caption{X-quang --- 10 DSC thấp nhất}
+\end{subfigure}
+\caption{Tái hiện: trực quan X-quang (tốt vs.\ xấu). Modality hoạt động tương đối ổn nhất.}
+\label{fig:xray_summary}
+\end{figure*}
+
+\begin{figure*}[htbp]
+\centering
+\begin{subfigure}[b]{0.48\textwidth}
+    \includegraphics[width=\linewidth]{brain_summary_worst.png}
+    \caption{MRI não --- 10 DSC thấp nhất}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.48\textwidth}
+    \includegraphics[width=\linewidth]{breast_summary_worst.png}
+    \caption{Siêu âm vú --- 10 DSC thấp nhất}
+\end{subfigure}
+\caption{Tái hiện: não và vú --- saliency/M2IB chưa khu trú đúng tổn thương.}
+\label{fig:brain_breast_worst}
+\end{figure*}
+
+\begin{figure*}[htbp]
+\centering
+\begin{subfigure}[b]{0.48\textwidth}
+    \includegraphics[width=\linewidth]{ct_summary_best.png}
+    \caption{CT --- 10 DSC cao nhất (tái hiện)}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.48\textwidth}
+    \includegraphics[width=\linewidth]{ct_summary_worst.png}
+    \caption{CT --- 10 DSC thấp nhất}
+\end{subfigure}
+\caption{Tái hiện: CT phổi --- khoảng cách lớn so với DSC $\sim$80\% trên bài báo.}
+\label{fig:ct_summary}
+\end{figure*}
+
+\subsubsection{So sánh ablation bài báo (tham chiếu)}
+Để giải thích khoảng cách tái hiện, Bảng~\ref{tab:paper_ablation} nhắc lại đóng góp từng thành phần trên \textit{toàn bộ} dữ liệu test (bài báo). Tái hiện nhóm dừng ở mức thấp hơn nhiều bước 5 (+SAM), gợi ý lỗi tập trung ở M2IB/saliency và prompt SAM chứ không chỉ nnUNet.
+
+\begin{table}[htbp]
+\caption{Ablation trên bài báo (Table~4, cột All)}
+\label{tab:paper_ablation}
+\centering
+\small
+\begin{tabular}{lc}
+\toprule
+\textbf{Bước} & DSC (\%) \\
+\midrule
+1. Saliency (M2IB) & 46.23 \\
+2. + DHN-NCE & 49.10 \\
+3. + Post-processing & 51.62 \\
+4. + Connected components & 57.89 \\
+5. + SAM & 77.61 \\
+6. + nnUNet ensemble & 82.11 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Nguyên nhân sai lệch và hướng xử lý}
+\begin{enumerate}
+    \item \textbf{M2IB/saliency:} Mask gần rỗng hoặc phủ toàn ảnh trên US/MRI/CT --- cần debug lớp noise, chuẩn hóa, số bước tối ưu, $\beta$.
+    \item \textbf{Checkpoint:} Thử checkpoint BiomedCLIP tác giả (Google Drive) để tách lỗi Stage~1/2.
+    \item \textbf{Prompt:} Bài báo dùng prompt P3 (mô tả chi tiết) cho vú/não; đảm bảo khớp class từng ảnh.
+    \item \textbf{nnUNet:} Khôi phục 3 chu kỳ $\times$ 250 iter nếu đủ GPU/thời gian.
+    \item \textbf{Dữ liệu vú:} Thiếu UDIAT có thể lệch so bài báo.
+\end{enumerate}
+
+%==============================================================================
+\section{Kết luận}
+%==============================================================================
+
+Đồ án đã trình bày bài toán phân đoạn ảnh y khoa theo văn bản, phương pháp MedCLIP-SAMv2 ba giai đoạn, và thực nghiệm so sánh bài báo gốc với tái hiện trên GPU hạn chế. Pipeline chạy được end-to-end; X-quang cho kết quả trung gian khả quan ($\sim$50\% DSC); ba modality còn lại chưa đạt mức báo cáo. Hướng tiếp theo: sửa M2IB, dùng checkpoint tác giả, đủ cấu hình nnUNet, và bổ sung đánh giá NSD + $t$-test đầy đủ trên 3470 mẫu test.
+
+%==============================================================================
+\begin{thebibliography}{99}
+\bibitem{koleilat2024medclipsamv2}
+T. Koleilat, H. Asgariandehkordi, H. Rivaz, and Y. Xiao,
+``MedCLIP-SAMv2: Towards Universal Text-Driven Medical Image Segmentation,''
+\textit{arXiv:2409.19483}, 2024.
+
+\bibitem{zhang2023biomedclip}
+S. Zhang \textit{et al.},
+``BiomedCLIP: A Multimodal Biomedical Foundation Model,''
+\textit{arXiv:2303.00915}, 2023.
+
+\bibitem{wang2023m2ib}
+M. Wang, T. Rudner, and A. G. Wilson,
+``Visual Explanations of Image-Text Representations via Multi-Modal Information Bottleneck Attribution,''
+\textit{NeurIPS}, 2023.
+
+\bibitem{kirillov2023sam}
+A. Kirillov \textit{et al.},
+``Segment Anything,''
+\textit{ICCV}, 2023.
+
+\bibitem{isensee2021nnunet}
+F. Isensee \textit{et al.},
+``nnU-Net: a self-configuring method for deep learning-based biomedical image segmentation,''
+\textit{Nature Methods}, vol.~18, pp.~203--211, 2021.
+
+\bibitem{zhao2022bayesian}
+Y. Zhao \textit{et al.},
+``Efficient Bayesian Uncertainty Estimation for nnU-Net,''
+\textit{MICCAI}, 2022.
+
+\bibitem{ma2023medsam}
+J. Ma and B. Wang,
+``Segment Anything in Medical Images,''
+\textit{Nature Communications}, 2024.
+
+\bibitem{pelka2018roco}
+S. Pelka \textit{et al.},
+``Radiology Objects in COntext (ROCO),''
+\textit{Scientific Data}, 2018.
+\end{thebibliography}
+
+\end{document}
