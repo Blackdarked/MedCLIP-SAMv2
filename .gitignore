@@ -1,7 +1,9 @@
 /data/
 /models/
 /venv/
-/working/
+/working/*
+!/working/visualizations
+!/working/visualizations/**
 /__pycache__/
 /.claude/
 *.log
