@@ -263,10 +263,13 @@ Hệ điều hành & Windows 10 & Môi trường chính để chạy pipeline re
 \end{table}
 
 \subsection{Môi trường phần mềm}
-\begin{center}
+\begin{table}[H]
+\centering
 \footnotesize
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{|>{\raggedright\arraybackslash}p{0.17\linewidth}|>{\raggedright\arraybackslash}p{0.31\linewidth}|>{\raggedright\arraybackslash}p{0.40\linewidth}|}
+\caption{Môi trường phần mềm}
+\label{tab:software}
+\begin{tabular}{|>{\raggedright\arraybackslash}p{0.19\columnwidth}|>{\raggedright\arraybackslash}p{0.25\columnwidth}|>{\raggedright\arraybackslash}p{0.44\columnwidth}|}
 \hline
 \textbf{Thành phần} & \textbf{Thông số chi tiết / Phiên bản} & \textbf{Vai trò trong hệ thống thực nghiệm} \\
 \hline
@@ -274,7 +277,7 @@ Python & Python 3.11 & Ngôn ngữ lập trình nền tảng của toàn bộ h�
 \hline
 PyTorch & PyTorch 2.1.2 + CUDA 12.1 & Framework tính toán học sâu chính, quản lý bộ nhớ GPU. \\
 \hline
-open\_clip\_torch & v2.24.0 & Triển khai BioMedCLIP và DHN-NCE trong Stage 1. \\
+\makecell[l]{open\_clip\_\\torch} & v2.24.0 & Triển khai BioMedCLIP và DHN-NCE trong Stage 1. \\
 \hline
 SAM Backbone & Segment Anything Model ViT-H & Sinh mask phân đoạn từ các bounding box hoặc point prompts được tạo tự động. \\
 \hline
@@ -282,7 +285,7 @@ nnUNet & nnUNet v2 & Huấn luyện mô hình weakly supervised segmentation b�
 \hline
 scikit-image / Pillow & scikit-image, Pillow & Tiền xử lý ảnh, Otsu thresholding, xử lý mask và connected components. \\
 \hline
-NumPy / SciPy & NumPy, SciPy & Thực hiện tính toán ma trận, chuẩn hóa dữ liệu, thực hiện tính toán ma trận, nội suy và xử lý dữ liệu số. \\
+NumPy / SciPy & NumPy, SciPy & Tính toán ma trận, chuẩn hóa dữ liệu, nội suy và xử lý dữ liệu số. \\
 \hline
 pandas & pandas & Tổng hợp bảng kết quả và lưu kết quả thực nghiệm. \\
 \hline
@@ -291,9 +294,7 @@ tqdm & tqdm & Hiển thị tiến trình huấn luyện và suy luận pipeline.
 Matplotlib & Matplotlib & Trực quan hóa attention map, segmentation mask và kết quả thực nghiệm. \\
 \hline
 \end{tabular}
-\captionof{table}{\normalfont Môi trường phần mềm}
-\label{tab:software}
-\end{center}
+\end{table}
 
 \subsection{Thiết lập huấn luyện}
 
