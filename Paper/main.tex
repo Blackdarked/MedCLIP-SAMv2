@@ -336,56 +336,20 @@ Thực nghiệm đánh giá khả năng tổng quát hóa toàn diện của Med
 
 \noindent\textbf{Quy trình Tiền xử lý Dữ liệu (Data Preprocessing)}
 
-Mọi ảnh đầu vào từ các dataset trên đều phải trải qua chuỗi biến đổi nghiêm ngặt nhằm tương thích với kiến trúc mạng:
+Mọi ảnh đầu vào từ các dataset trên đều phải trải qua chuỗi biến đổi nghiêm ngặt nhằm tương thích với kiến trúc mạng.
 
 \textbf{Chuyển đổi kích thước (Resizing):} Ở giai đoạn fine-tuning BiomedCLIP, ảnh được đưa về kích thước $224 \times 224$ theo preprocessing của OpenCLIP. Ở giai đoạn huấn luyện nnU-Net, ảnh và mask được resize đồng bộ về $256 \times 256$ để phù hợp với cấu hình mô hình. Với SAM, ảnh và saliency map được xử lý theo cơ chế tiền xử lý riêng của mô hình.
 
-\textbf{Chuẩn hóa (Normalization):} Ảnh được chuẩn hóa về thang giá trị phù hợp với backbone sử dụng. Với các mô hình kiểu CLIP/BiomedCLIP, có thể biểu diễn bằng công thức:
-\begin{equation}
-I_{\mathrm{norm}} = \frac{I - \mu}{\sigma}
-\end{equation}
-Trong đó, $\mu$ và $\sigma$ là giá trị trung bình và độ lệch chuẩn của tập tiền huấn luyện.
+\textbf{Chuẩn hóa (Normalization):} Ảnh được chuẩn hóa về thang giá trị phù hợp với backbone sử dụng. Với các mô hình kiểu CLIP/BiomedCLIP, có thể biểu diễn bằng công thức $I_{\mathrm{norm}} = (I - \mu)/\sigma$, trong đó $\mu$ và $\sigma$ là giá trị trung bình và độ lệch chuẩn của tập tiền huấn luyện.
 
 \textbf{Xử lý mask và tạo pseudo-label:} Mask được chuyển về dạng nhị phân để phục vụ huấn luyện và đánh giá. Ở giai đoạn zero-shot, saliency map được nội suy lên kích thước ảnh gốc, sau đó áp dụng KMeans/Otsu và lọc các thành phần nhỏ để tạo pseudo-label. Khi resize mask, sử dụng nội suy gần nhất để giữ nguyên biên vùng tổn thương.
 
-\vspace{0.4em}
 \begin{figure}[H]
 \centering
-\begin{subfigure}{\linewidth}
-\centering
-\includegraphics[width=\linewidth,keepaspectratio]{breast_sample.png}
-\caption{\normalfont Breast US (BUSI / UDIAT)}
-\label{fig:sample_breast}
-\end{subfigure}
-
-\vspace{0.35em}
-\begin{subfigure}{\linewidth}
-\centering
-\includegraphics[width=\linewidth,keepaspectratio]{brain_sample_0001.png}
-\caption{\normalfont Brain MRI (Br35H)}
-\label{fig:sample_brain}
-\end{subfigure}
-
-\vspace{0.35em}
-\begin{subfigure}{\linewidth}
-\centering
-\includegraphics[width=\linewidth,keepaspectratio]{xray_sample_0001.png}
-\caption{\normalfont Lung X-ray (Montgomery + Shenzhen)}
-\label{fig:sample_xray}
-\end{subfigure}
-
-\vspace{0.35em}
-\begin{subfigure}{\linewidth}
-\centering
-\includegraphics[width=\linewidth,keepaspectratio]{ct_sample.png}
-\caption{\normalfont Lung CT (LUNA16)}
-\label{fig:sample_ct}
-\end{subfigure}
-\caption{\normalfont Ví dụ ảnh mẫu từ bốn tập dữ liệu thực nghiệm (ảnh đầu vào, ground truth, kết quả zero-shot và nnU-Net).}
-\label{fig:dataset_samples}
+\includegraphics[width=\linewidth,height=0.55\textheight,keepaspectratio]{preprocessing.png}
+\caption{\normalfont Minh họa tiền xử lý ảnh trước và sau ($224 \times 224$, chuẩn hóa) trên bốn modality: Breast US, Brain MRI, Lung CT và Chest X-ray.}
+\label{fig:preprocessing}
 \end{figure}
-
-\clearpage
 %==============================================================================
 \section{Quy trình thực nghiệm}
 \label{sec:quytrinh}
@@ -521,7 +485,7 @@ Tại inference, thay vì dùng $B_{\mathrm{coarse}}$ trực tiếp, dùng detec
 B_{\mathrm{final}} = B_{\mathrm{refined}} \oplus \delta
 \label{eq:box-expand}
 \end{equation}
-với $\delta$ là hệ số mở rộng nhỏ (ví dụ 5--10 pixel mỗi chiều) để đảm bảo box bao phủ đủ vùng biên của cấu trúc giải phẫu. $B_{\mathrm{final}}$ này được truyền vào SAM~\cite{ref2,ref4} thay cho $B_{\mathrm{coarse}}$.
+Với $\delta$ là hệ số mở rộng nhỏ (ví dụ 5--10 pixel mỗi chiều) để đảm bảo box bao phủ đủ vùng biên của cấu trúc giải phẫu. $B_{\mathrm{final}}$ này được truyền vào SAM~\cite{ref2,ref4} thay cho $B_{\mathrm{coarse}}$.
 
 \textbf{Bước 5: Phần còn lại của pipeline.}
 
