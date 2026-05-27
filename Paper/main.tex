@@ -2,8 +2,14 @@
 % BẮT BUỘC XeLaTeX. Overleaf: Menu → Settings → Compiler → XeLaTeX
 
 \usepackage{array}
+\usepackage{makecell}
+\renewcommand{\theadalign}{cc}
 \usepackage{fontspec}
-\setmainfont{Times New Roman}
+\setmainfont{Times New Roman}[
+  BoldFont = Times New Roman Bold,
+  ItalicFont = Times New Roman Italic,
+  BoldItalicFont = Times New Roman Bold Italic
+]
 \setmonofont{Courier New}
 
 \usepackage[vietnamese]{babel}
@@ -22,11 +28,40 @@
   singlelinecheck=false,
   labelsep=period
 }
+\captionsetup[table]{
+  font=small,
+  labelfont=normalfont,
+  textfont=normalfont,
+  justification=centering,
+  singlelinecheck=false,
+  labelsep=period,
+  skip=4pt
+}
+\setlength{\textfloatsep}{4pt plus 1pt minus 1pt}
+\setlength{\floatsep}{4pt plus 1pt minus 1pt}
+\setlength{\intextsep}{4pt plus 1pt minus 1pt}
 \usepackage{hyperref}
 \usepackage{listings}
 \usepackage{adjustbox}
+\usepackage{dblfloatfix}
+\usepackage{float}
+\usepackage{placeins}
+\usepackage{enumitem}
+\setlist[enumerate]{topsep=0pt, partopsep=0pt, itemsep=0pt, parsep=0pt}
 
 \graphicspath{{images/}}
+
+% Thu khoảng cách giữa section/subsection (gần mẫu báo cáo IS252)
+\makeatletter
+\def\section{\@startsection{section}{1}{\z@}%
+  {1.0ex plus .3ex minus .2ex}%
+  {0.5ex plus .2ex minus .1ex}%
+  {\reset@font\normalsize\centering}}%
+\def\subsection{\@startsection{subsection}{2}{\z@}%
+  {0.8ex plus .25ex minus .15ex}%
+  {0.15ex plus .1ex minus .05ex}%
+  {\reset@font\normalsize\itshape}}%
+\makeatother
 
 \lstset{
   basicstyle=\ttfamily\footnotesize,
@@ -103,7 +138,6 @@ Mô hình thể hiện ưu thế ở cả hai kịch bản phân đoạn không 
 \captionof{figure}{\normalfont Mô hình hóa ý tưởng text-driven medical image segmentation kết hợp giữa Vision-Language Models (BioMedCLIP) và Foundation Models cho phân đoạn ảnh (SAM)~\cite{ref1}.}
 \label{fig:kientruc}
 \end{center}
-\vspace{0.3em}
 
 %==============================================================================
 \section{Mục tiêu nghiên cứu}
@@ -114,7 +148,6 @@ Phân tích và tái hiện pipeline MedCLIP-SAMv2~\cite{ref1} từ bài báo g�
 
 \begin{itemize}
     \item Nghiên cứu sâu kiến trúc hệ thống: Phân tích cơ chế liên kết đa phương thức giữa mô hình mã hóa ngôn ngữ-hình ảnh y tế (BioMedCLIP)~\cite{ref3} và mô hình phân đoạn hình học (SAM)~\cite{ref2,ref4}, đặc biệt là vai trò trung gian của khối nghẽn thông tin đa phương thức (Multi-modal Information Bottleneck - M2IB)~\cite{ref7}.
-    \item Tái hiện thành công thực nghiệm: Triển khai mã nguồn từ bài báo gốc, cấu hình môi trường phần cứng cục bộ và tối ưu hóa quy trình chạy pipeline zero-shot từ kho lưu trữ Blackdarked/MedCLIP-SAMv2~\cite{ref1}.
     \item Đánh giá hiệu quả định lượng: Đo lường năng lực phân đoạn dựa trên các chỉ số tiêu chuẩn của ngành y tế (Dice Coefficient, Intersection over Union - IoU) trên tập dữ liệu kiểm thử.
     \item So sánh hiệu năng: Đặt hiệu quả phân đoạn của MedCLIP-SAMv2 trong bức tranh so sánh đối chiếu với các phương pháp học sâu truyền thống giám sát hoàn toàn (Full-supervised U-Net)~\cite{ref6} và mô hình SAM nguyên bản~\cite{ref2,ref4} không có định hướng ngữ nghĩa y khoa.
 \end{itemize}
@@ -175,19 +208,18 @@ Trong các mô hình ứng dụng SAM gốc, hệ thống bắt buộc phải nh
 \label{sec:kientruc-pipeline}
 %==============================================================================
 
-Pipeline xử lý của framework MedCLIP-SAMv2~\cite{ref1} là một quy trình khép kín, chuyển đổi thông tin từ ảnh y tế thô và văn bản chỉ dẫn thành một Mask phân đoạn chính xác cao. Quy trình bao gồm 6 thành phần cốt lõi được kết nối tuần tự:
+Pipeline xử lý của framework MedCLIP-SAMv2~\cite{ref1} là một quy trình khép kín, chuyển đổi thông tin từ ảnh y tế thô và văn bản chỉ dẫn thành một Mask phân đoạn chính xác cao. Quy trình bao gồm 6 thành phần cốt lõi được kết nối tuần tự (Hình~\ref{fig:dataflow}).
 
-\vspace{0.4em}
 \setcounter{figure}{3}
-\begin{center}
-\includegraphics[width=\linewidth,keepaspectratio]{SoDoKhoiChiTiet.png}
-\captionof{figure}{\normalfont Sơ đồ kiến trúc luồng dữ liệu từ embedding đa phương thức, saliency map M2IB và sinh segmentation mask bằng SAM~\cite{ref1}.}
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth,keepaspectratio]{SoDoKhoiChiTiet.png}
+\caption{\normalfont Sơ đồ kiến trúc luồng dữ liệu từ embedding đa phương thức, saliency map M2IB và sinh segmentation mask bằng SAM~\cite{ref1}.}
 \label{fig:dataflow}
-\end{center}
-\vspace{0.3em}
+\end{figure*}
+\FloatBarrier
 
 \subsection{Các thành phần chính trong Pipeline}
-
 \begin{enumerate}
     \item Medical Image (Ảnh y tế đầu vào): Ảnh 2D từ các phương thức chụp chiếu, được biểu diễn dưới dạng ma trận điểm ảnh $I$.
     \item Text Prompt (Gợi ý văn bản): Chuỗi ký tự tự nhiên mô tả mục tiêu cần phân đoạn (ví dụ: ``breast tumor'', ``lung nodule''). Văn bản này được xử lý thông qua bộ mã hóa của BioMedCLIP~\cite{ref3} để sinh ra text embedding.
@@ -200,6 +232,326 @@ Pipeline xử lý của framework MedCLIP-SAMv2~\cite{ref1} là một quy trình
 \subsection{Hàm mất mát cải tiến DHN-NCE}
 
 Một đóng góp lý thuyết của phiên bản v2 là việc áp dụng hàm mất mát Decoupled Hard Negative Noise Contrastive Estimation (DHN-NCE)~\cite{ref1} ở giai đoạn tinh chỉnh BioMedCLIP~\cite{ref3}. Hàm DHN-NCE~\cite{ref1} giải quyết hiệu quả hiện tượng liên kết âm (negative-coupling effect) bằng cách loại bỏ mẫu dương khỏi mẫu số của biểu thức tương phản, giúp tối ưu hóa bộ nhớ và tăng cường khả năng phân biệt giữa các tổn thương y khoa có hình thái tương đồng nhưng bản chất bệnh lý khác nhau.
+
+%==============================================================================
+\section{Môi trường thực nghiệm}
+\label{sec:moitruong}
+%==============================================================================
+
+Quá trình tái hiện được triển khai trên máy tính sử dụng GPU NVIDIA GeForce RTX 4060 Ti 16GB VRAM và môi trường Windows 10. Toàn bộ pipeline được xây dựng dựa trên repository MedCLIP-SAMv2 phiên bản tái hiện cho Windows, bao gồm ba giai đoạn: fine-tuning BioMedCLIP~\cite{ref3}, zero-shot segmentation bằng M2IB~\cite{ref7} + SAM~\cite{ref2,ref4} và weakly supervised segmentation với nnUNet v2~\cite{ref1}.
+
+Dữ liệu thực nghiệm bao gồm bốn tập dữ liệu public tương ứng với các modality trong bài báo~\cite{ref1}: Breast Ultrasound, Brain MRI, Chest X-ray và Lung CT.
+
+\subsection{Cấu hình phần cứng}
+\begin{table}[H]
+\centering
+\small
+\caption{Cấu hình phần cứng}
+\label{tab:hardware}
+\begin{tabular}{|>{\raggedright\arraybackslash}p{0.17\linewidth}|>{\raggedright\arraybackslash}p{0.31\linewidth}|>{\raggedright\arraybackslash}p{0.40\linewidth}|}
+\hline
+\textbf{Thành phần} & \textbf{Thông số chi tiết / Phiên bản} & \textbf{Vai trò trong hệ thống thực nghiệm} \\
+\hline
+GPU & NVIDIA GeForce RTX 4060 Ti (16GB VRAM) & Tăng tốc tính toán tensor, lưu trữ trọng số mã hóa của ViT-H SAM và BioMedCLIP. \\
+\hline
+RAM & 16GB DDR4 @3200MHz & Xử lý luồng dữ liệu, nạp dataset và tiền xử lý ảnh kích thước lớn. \\
+\hline
+Hệ điều hành & Windows 10 & Môi trường chính để chạy pipeline replication MedCLIP-SAMv2. \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Môi trường phần mềm}
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{|>{\raggedright\arraybackslash}p{0.17\linewidth}|>{\raggedright\arraybackslash}p{0.31\linewidth}|>{\raggedright\arraybackslash}p{0.40\linewidth}|}
+\hline
+\textbf{Thành phần} & \textbf{Thông số chi tiết / Phiên bản} & \textbf{Vai trò trong hệ thống thực nghiệm} \\
+\hline
+Python & Python 3.11 & Ngôn ngữ lập trình nền tảng của toàn bộ hệ thống. \\
+\hline
+PyTorch & PyTorch 2.1.2 + CUDA 12.1 & Framework tính toán học sâu chính, quản lý bộ nhớ GPU. \\
+\hline
+open\_clip\_torch & v2.24.0 & Triển khai BioMedCLIP và DHN-NCE trong Stage 1. \\
+\hline
+SAM Backbone & Segment Anything Model ViT-H & Sinh mask phân đoạn từ các bounding box hoặc point prompts được tạo tự động. \\
+\hline
+nnUNet & nnUNet v2 & Huấn luyện mô hình weakly supervised segmentation bằng pseudo-labels. \\
+\hline
+scikit-image / Pillow & scikit-image, Pillow & Tiền xử lý ảnh, Otsu thresholding, xử lý mask và connected components. \\
+\hline
+NumPy / SciPy & NumPy, SciPy & Thực hiện tính toán ma trận, chuẩn hóa dữ liệu, thực hiện tính toán ma trận, nội suy và xử lý dữ liệu số. \\
+\hline
+pandas & pandas & Tổng hợp bảng kết quả và lưu kết quả thực nghiệm. \\
+\hline
+tqdm & tqdm & Hiển thị tiến trình huấn luyện và suy luận pipeline. \\
+\hline
+Matplotlib & Matplotlib & Trực quan hóa attention map, segmentation mask và kết quả thực nghiệm. \\
+\hline
+\end{tabular}
+\captionof{table}{\normalfont Môi trường phần mềm}
+\label{tab:software}
+\end{center}
+
+\subsection{Thiết lập huấn luyện}
+
+Do giới hạn phần cứng GPU đơn (RTX 4060 Ti 16GB VRAM), một số tham số huấn luyện đã được giảm so với cấu hình trong bài báo gốc~\cite{ref1}.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Thiết lập huấn luyện nnUNet: bài báo gốc và tái hiện}
+\label{tab:training}
+\begin{tabular}{|>{\raggedright\arraybackslash}p{0.34\linewidth}|>{\centering\arraybackslash}p{0.26\linewidth}|>{\centering\arraybackslash}p{0.26\linewidth}|}
+\hline
+\textbf{Hạng mục} & \textbf{Bài báo gốc} & \textbf{Tái hiện nhóm} \\
+\hline
+nnUNet training cycles & 3 chu kỳ & 1 chu kỳ \\
+\hline
+Epoch mỗi cycle & 200 & 200 \\
+\hline
+Iterations / epoch & 250 & 50 \\
+\hline
+DataLoader workers & --- & \texttt{num\_workers = 0} \\
+\hline
+\end{tabular}
+\end{table}
+
+%==============================================================================
+\section{Tập dữ liệu (Dataset)}
+\label{sec:dataset}
+%==============================================================================
+
+Thực nghiệm đánh giá khả năng tổng quát hóa toàn diện của MedCLIP-SAMv2 thông qua việc phân đoạn trên 4 tập dữ liệu y tế đại diện cho 4 modality riêng biệt:
+
+\begin{itemize}
+    \item Breast Ultrasound (BUSI / UDIAT): Ảnh siêu âm tuyến vú (khối u lành/ác tính), có độ phức tạp lớn do nhiễu đốm dày đặc và độ tương phản ranh giới cực kém.
+    \item Lung CT (LUNA16): Ảnh cắt lớp vi tính lồng ngực (phân đoạn tổn thương phổi/nốt đặc), độ phức tạp lớn bởi lượng thông tin cấu trúc lớn và biên độ xám rộng.
+    \item Lung X-ray (Montgomery + Shenzhen): Ảnh X-quang ngực phẳng 2D (phân đoạn nhu mô phổi), đánh giá khả năng bóc tách vùng cấu trúc giải phẫu lớn dựa trên định hướng ngữ nghĩa văn bản.
+    \item Brain MRI (Br35H): Ảnh cộng hưởng từ não (phân đoạn khối u não), đánh giá khả năng khu trú vùng tổn thương trên modality có độ tương phản mô mềm thấp và biến dạng hình học đa dạng.
+\end{itemize}
+
+\noindent\textbf{Quy trình Tiền xử lý Dữ liệu (Data Preprocessing)}
+
+Mọi ảnh đầu vào từ các dataset trên đều phải trải qua chuỗi biến đổi nghiêm ngặt nhằm tương thích với kiến trúc mạng:
+
+\textbf{Chuyển đổi kích thước (Resizing):} Ở giai đoạn fine-tuning BiomedCLIP, ảnh được đưa về kích thước $224 \times 224$ theo preprocessing của OpenCLIP. Ở giai đoạn huấn luyện nnU-Net, ảnh và mask được resize đồng bộ về $256 \times 256$ để phù hợp với cấu hình mô hình. Với SAM, ảnh và saliency map được xử lý theo cơ chế tiền xử lý riêng của mô hình.
+
+\textbf{Chuẩn hóa (Normalization):} Ảnh được chuẩn hóa về thang giá trị phù hợp với backbone sử dụng. Với các mô hình kiểu CLIP/BiomedCLIP, có thể biểu diễn bằng công thức:
+\begin{equation}
+I_{\mathrm{norm}} = \frac{I - \mu}{\sigma}
+\end{equation}
+Trong đó, $\mu$ và $\sigma$ là giá trị trung bình và độ lệch chuẩn của tập tiền huấn luyện.
+
+\textbf{Xử lý mask và tạo pseudo-label:} Mask được chuyển về dạng nhị phân để phục vụ huấn luyện và đánh giá. Ở giai đoạn zero-shot, saliency map được nội suy lên kích thước ảnh gốc, sau đó áp dụng KMeans/Otsu và lọc các thành phần nhỏ để tạo pseudo-label. Khi resize mask, sử dụng nội suy gần nhất để giữ nguyên biên vùng tổn thương.
+
+\vspace{0.4em}
+\begin{figure}[H]
+\centering
+\begin{subfigure}{\linewidth}
+\centering
+\includegraphics[width=\linewidth,keepaspectratio]{breast_sample.png}
+\caption{\normalfont Breast US (BUSI / UDIAT)}
+\label{fig:sample_breast}
+\end{subfigure}
+
+\vspace{0.35em}
+\begin{subfigure}{\linewidth}
+\centering
+\includegraphics[width=\linewidth,keepaspectratio]{brain_sample_0001.png}
+\caption{\normalfont Brain MRI (Br35H)}
+\label{fig:sample_brain}
+\end{subfigure}
+
+\vspace{0.35em}
+\begin{subfigure}{\linewidth}
+\centering
+\includegraphics[width=\linewidth,keepaspectratio]{xray_sample_0001.png}
+\caption{\normalfont Lung X-ray (Montgomery + Shenzhen)}
+\label{fig:sample_xray}
+\end{subfigure}
+
+\vspace{0.35em}
+\begin{subfigure}{\linewidth}
+\centering
+\includegraphics[width=\linewidth,keepaspectratio]{ct_sample.png}
+\caption{\normalfont Lung CT (LUNA16)}
+\label{fig:sample_ct}
+\end{subfigure}
+\caption{\normalfont Ví dụ ảnh mẫu từ bốn tập dữ liệu thực nghiệm (ảnh đầu vào, ground truth, kết quả zero-shot và nnU-Net).}
+\label{fig:dataset_samples}
+\end{figure}
+
+\clearpage
+%==============================================================================
+\section{Quy trình thực nghiệm}
+\label{sec:quytrinh}
+%==============================================================================
+
+Toàn bộ pipeline được thực hiện tuần tự qua ba giai đoạn chính: fine-tuning BiomedCLIP, sinh saliency/zero-shot segmentation bằng M2IB kết hợp SAM, và huấn luyện nnUNet trên các pseudo-label thu được từ giai đoạn trước. Kết quả trung gian và kết quả cuối cùng được lưu trong thư mục làm việc của hệ thống để phục vụ đánh giá và tái sử dụng ở các lần chạy sau.
+
+Bên dưới là chi tiết 4 giai đoạn xử lý chính diễn ra bên trong hệ thống:
+
+\textbf{Bước 1: Preprocessing (Tiền xử lý)} Hệ thống đọc dữ liệu ảnh từ các thư mục đã được chia sẵn bởi tác giả cho từng bộ dữ liệu. Ở giai đoạn BiomedCLIP, ảnh đầu vào được chuyển về định dạng RGB và đưa qua bộ tiền xử lý chuẩn của OpenCLIP/BiomedCLIP, tương ứng với kích thước làm việc $224 \times 224$. Ở giai đoạn chuẩn bị dữ liệu cho nnUNet, ảnh và Mask được resize đồng bộ về kích thước cố định $256 \times 256$ theo cấu hình huấn luyện của mô hình. Mask ground truth được xử lý theo hướng nhị phân hóa để phù hợp với bài toán phân đoạn nhị phân.
+
+\textbf{Bước 2: Embedding Generation (Tạo vector nhúng):} Sau khi tiền xử lý, ảnh được đưa qua image encoder để thu được image embedding vector, trong khi mô tả văn bản tương ứng được tokenized và đưa qua text encoder để thu được text embedding vector. Hai quá trình này tạo thành cặp đặc trưng ảnh--văn bản, là đầu vào cho bước sinh saliency ở giai đoạn tiếp theo.
+
+\textbf{Bước 3: Attention Map Generation (Tạo bản đồ chú ý):} Khối saliency tối ưu một Mask theo từng vùng nhỏ của ảnh nhằm tăng mức tương đồng giữa đặc trưng ảnh và văn bản, đồng thời giảm ảnh hưởng của các vùng không liên quan. Kết quả thu được là một bản đồ saliency liên tục thể hiện mức độ quan trọng của từng vùng trong ảnh đối với mô tả văn bản. Bản đồ này sau đó được nội suy về kích thước ảnh gốc và xử lý hậu kỳ bằng phương pháp phân cụm để tách vùng nền và vùng quan tâm, đồng thời loại bỏ các thành phần nhỏ rời rạc nhằm tạo ra một mask thô.
+
+\textbf{Bước 4: Segmentation Inference (Suy luận phân đoạn):} Mask thô từ saliency map được dùng làm đầu vào gợi ý cho mô hình phân đoạn. Tùy theo cấu hình của từng bộ dữ liệu, mô hình có thể nhận đầu vào dưới dạng bounding box hoặc điểm gợi ý. Mô hình sau đó kết hợp ảnh gốc với prompt để tạo ra Mask phân đoạn nhị phân cuối cùng. Các Mask trung gian và Mask cuối được lưu lại để phục vụ đánh giá. Ở bước đánh giá, hệ thống sử dụng các chỉ số Dice và NSD để đo chất lượng phân đoạn.
+
+%==============================================================================
+\section{Kết quả thực nghiệm}
+\label{sec:ketqua}
+%==============================================================================
+
+Thực nghiệm chạy toàn bộ pipeline MedCLIP-SAMv2 trên bốn bộ dữ liệu (Breast US, Brain MRI, Lung X-ray, Lung CT).
+
+\textbf{Nhận xét chính:}
+
+\begin{itemize}
+    \item \textbf{Hiệu năng tối ưu trên Lung X-ray:} Pipeline đạt kết quả khả quan nhất trên ảnh X-quang phổi với chỉ số DSC xấp xỉ 50\% ở cả hai cấu hình zero-shot và weakly-supervised. Điều này cho thấy quy trình đề xuất có khả năng khởi tạo nhãn giả (pseudo-labels) hữu dụng trên modality này.
+    \item \textbf{Hạn chế trên các modalities còn lại:} Ngược lại, chỉ số DSC trên Breast US, Brain MRI và Lung CT đạt rất thấp (4\%--9\%). Kết quả phản ánh chuỗi xử lý từ M2IB~\cite{ref7}, qua hậu xử lý đến SAM~\cite{ref2,ref4} chưa sinh ra pseudo-labels đủ chất lượng để huấn luyện nnUNet hiệu quả.
+    \item \textbf{Khoảng cách so với bài báo gốc:} Sự chênh lệch lớn này chỉ ra rằng các thành phần cốt lõi (tinh chỉnh BiomedCLIP~\cite{ref3}, định vị thuộc tính M2IB~\cite{ref7}, hậu xử lý) cần được tối ưu hóa riêng cho đặc thù của từng loại ảnh y tế.
+\end{itemize}
+
+\textbf{Phân tích nguyên nhân khả thi:}
+
+\begin{itemize}
+    \item \textbf{Suy hao bản đồ độ chú ý (Saliency Map):} Trên Breast, Brain và CT, M2IB~\cite{ref7} cho saliency map kém (gần như rỗng), khiến các bounding boxes hoặc points trích xuất không định vị đúng tổn thương. Thiếu thông tin định hướng chính xác, SAM~\cite{ref2,ref4} không thể tạo mask chuẩn, dẫn đến hiện tượng nhiễu nhãn khi huấn luyện nnUNet.
+    \item \textbf{Đặc trưng hình học thuận lợi của Lung X-ray:} Ảnh X-quang phổi có cấu trúc giải phẫu và vùng tổn thương rõ ràng hơn. Đặc điểm này giúp M2IB~\cite{ref7} dễ hội tụ và trích xuất được bản đồ độ chú ý có ý nghĩa.
+    \item \textbf{Hạn chế siêu tham số và tài nguyên tính toán:} Việc giảm quy mô tính toán, số epoch, kích thước batch và điều chỉnh hàm mất mát DHN-NCE~\cite{ref1} làm giảm chất lượng tinh chỉnh BiomedCLIP~\cite{ref3} ở giai đoạn thượng nguồn, tạo hiệu ứng lan truyền làm suy giảm hiệu năng của toàn bộ chuỗi xử lý phía sau.
+\end{itemize}
+
+Bảng~\ref{tab:dsc_results} so sánh giá trị báo cáo trong bài~\cite{ref1} với kết quả thu được trên bản triển khai hiện tại cho zero-shot (ZS) và weakly-supervised (WS, nnUNet trên pseudo-labels).
+
+\clearpage
+\twocolumn[
+\centering
+\captionof{table}{Tóm tắt kết quả DSC (\%)}
+\label{tab:dsc_results}
+\vspace{0.2em}
+\begingroup
+\setlength{\tabcolsep}{6pt}
+\renewcommand{\arraystretch}{1.2}
+\setlength{\extrarowheight}{2pt}
+\newcolumntype{D}{>{\centering\arraybackslash}m{0.19\linewidth}}
+\begin{adjustbox}{width=\linewidth,center}
+\begin{tabular}{|D|D|D|D|D|}
+\hline
+\thead{Dataset} & \thead{ZS DSC\\(paper)} & \thead{ZS DSC\\(ours)} & \thead{WS DSC\\(paper)} & \thead{WS DSC\\(ours)} \\
+\hline
+Breast US & 77.76\% & 5.17\% & 78.87\% & 5.61\% \\
+\hline
+Brain MRI & 76.52\% & 4.86\% & 80.03\% & 5.01\% \\
+\hline
+Lung X-ray & 75.79\% & 50.01\% & 80.77\% & 49.62\% \\
+\hline
+Lung CT & 80.38\% & 7.93\% & 88.78\% & 9.04\% \\
+\hline
+\end{tabular}
+\end{adjustbox}
+\endgroup
+\vspace{0.5em}
+]
+
+%==============================================================================
+\section{Hạn chế}
+\label{sec:hanhche}
+%==============================================================================
+
+Qua quá trình thực nghiệm, triển khai và đánh giá chi tiết framework MedCLIP-SAMv2~\cite{ref1} trên môi trường phần cứng cục bộ, nghiên cứu đã chứng minh một hướng đi đầy hứa hẹn trong việc kết hợp mô hình Ngôn ngữ--Thị giác (VLM) phục vụ bài toán phân đoạn ảnh y tế zero-shot. Tuy nhiên, kết quả định lượng thực tế cho thấy sự phân hóa hiệu năng cực kỳ nghiêm trọng giữa các phương thức tạo ảnh: ngoài Lung X-ray đạt kết quả tương đối khả quan ($\sim$50\% DSC), cả ba miền dữ liệu phức tạp còn lại bao gồm Breast US (Siêu âm vú), Brain MRI (Cộng hưởng từ não) và Lung CT (Cắt lớp vi tính phổi) đều cho kết quả rất thấp, dao động tụt sâu chỉ từ 4\% đến 9\% DSC.
+
+Dựa trên việc phân tích sâu chuỗi pipeline, sự thất bại này không nằm ở bản thân kiến trúc Segment Anything mà bắt nguồn trực tiếp từ hai nguyên nhân cốt lõi sau:
+
+\begin{enumerate}
+    \item \textbf{Chất lượng nhãn giả (Pseudo-labels) kém do suy hao bản đồ chú ý:} Cơ chế Bottleneck thông tin đa phương thức (M2IB)~\cite{ref7} và quá trình trích xuất thuộc tính liên kết từ BiomedCLIP~\cite{ref3} gặp khó khăn lớn khi đối mặt với ảnh y tế có độ nhiễu đốm cao (như siêu âm) hoặc cấu trúc mô mềm phức tạp (như MRI). Bản đồ độ chú ý (Saliency Map) sinh ra gần như rỗng hoặc bị nhiễu nặng, dẫn đến các điểm gợi ý hình học (Visual Prompts) định hướng cho SAM~\cite{ref2,ref4} bị lệch mục tiêu hoàn toàn.
+    \item \textbf{Rào cản tài nguyên phần cứng và tốc độ suy luận:} Mô hình SAM~\cite{ref2,ref4} bản gốc phụ thuộc vào các mạng xương sống khổng lồ (Backbone ViT-H). Điều này tạo ra rào cản công nghệ cực lớn, khiến mô hình hoàn toàn bất khả thi khi triển khai trên các thiết bị y tế lâm sàng tuyến đầu hoặc xử lý video phẫu thuật theo thời gian thực (Real-time).
+\end{enumerate}
+
+Tóm lại, mặc dù pipeline tổng thể (CLIP-based attribution + SAM + nnUNet) là một ý tưởng khoa học đột phá, nhưng cấu hình hiện tại của MedCLIP-SAMv2~\cite{ref1} chưa đủ độ tin cậy và tính tổng quát hóa cao để ứng dụng vào thực tế lâm sàng. Hệ thống bắt buộc phải được tái cấu trúc theo hướng tinh gọn, loại bỏ sự phụ thuộc vào các prompt hình học không ổn định, nâng cao khả năng bám biên giải phẫu và tối ưu hóa chi phí tính toán.
+
+%==============================================================================
+\section{Đề xuất cải tiến}
+\label{sec:dexuat}
+%==============================================================================
+
+\subsection{Tinh chỉnh Bounding Box theo hướng PPBoost cho MedCLIP-SAMv2}
+
+Trong pipeline MedCLIP-SAMv2~\cite{ref1}, chất lượng của bước phân đoạn zero-shot (Stage 2) phụ thuộc trực tiếp vào độ chính xác của bounding box truyền vào SAM~\cite{ref2,ref4}. Bounding box này được trích xuất từ bản đồ saliency do M2IB~\cite{ref7} tạo ra, qua bước nhị phân hóa và phân tích connected component.
+
+Kết quả ablation trong bài báo gốc~\cite{ref1} cho thấy đầu ra của Stage 1 sau toàn bộ quá trình tiền xử lý chỉ đạt 57.89\% DSC. SAM sau đó nâng con số này lên 77.61\% DSC, tức là cải thiện gần 20 điểm. Nhưng con số 77.61\% đó vẫn bị giới hạn bởi chất lượng của bounding box đầu vào, vì SAM chỉ ``cắt'' trong phạm vi box được cung cấp. Box càng chính xác, mask đầu ra càng tốt.
+
+Vấn đề là saliency map từ M2IB thường kích hoạt trên vùng rộng hơn hoặc lệch so với vị trí thực của tổn thương, đặc biệt với các cấu trúc nhỏ như khối u vú hay khối u não. Bounding box được trích xuất từ vùng kích hoạt đó sẽ không bao phủ đúng vị trí, khiến SAM không có cơ hội tạo ra mask tốt dù kiến trúc của nó đủ mạnh.
+
+\textbf{Ý tưởng cải tiến:}
+
+Bổ sung một bước tinh chỉnh bounding box giữa Stage 1 và Stage 2, dựa trên nguyên lý của PPBoost~\cite{ref8}. Ý tưởng cốt lõi là dùng chính các cặp (ảnh, bounding box) có độ tin cậy cao từ Stage 1 để huấn luyện một detector nhẹ, sau đó dùng detector đó để tạo ra bounding box chính xác hơn cho toàn bộ tập dữ liệu trước khi truyền vào SAM. Đặc biệt, bước bổ sung này không thay đổi bất kỳ thành phần nào của pipeline gốc.
+
+\textbf{Phương pháp tiến hành:}
+
+\textbf{Bước 1: Tạo pseudo-bounding box ban đầu.}
+
+Giữ nguyên Stage 1 của MedCLIP-SAMv2~\cite{ref1}: BioMedCLIP~\cite{ref3} fine-tuned với DHN-NCE tạo ra bản đồ saliency thông qua M2IB~\cite{ref7}, sau đó nhị phân hóa và phân tích connected component để lấy bounding box thô $B_{\mathrm{coarse}}$.
+
+\textbf{Bước 2: Lọc theo độ không chắc chắn.}
+
+Để chọn ra những box đủ chất lượng làm dữ liệu huấn luyện cho detector, áp dụng tiêu chí lọc dựa trên entropy của bản đồ saliency:
+\begin{equation}
+U(B) = -\sum_{(i,j) \in B} \lambda S(i,j) \log \lambda S(i,j)
+\label{eq:uncertainty}
+\end{equation}
+Trong đó $\lambda S$ là bản đồ saliency stochastic từ M2IB~\cite{ref7}. Những box có entropy thấp (vùng saliency tập trung, không phân tán) được giữ lại. Đặt ngưỡng $\tau_U$ để chỉ lấy top-$k$\% box có độ tin cậy cao nhất. Kết quả là tập $\mathcal{D}_{\mathrm{det}} = \{(I_i, B_i) : U(B_i) < \tau_U\}$.
+
+\textbf{Bước 3: Huấn luyện pseudo-labeled detector.}
+
+Dùng $\mathcal{D}_{\mathrm{det}}$ để huấn luyện một lightweight object detector, ví dụ DETR hoặc một biến thể nhỏ hơn như Conditional DETR, với backbone frozen từ BioMedCLIP~\cite{ref3} (dùng lại image encoder từ Stage 1 để tránh thêm tham số). Loss huấn luyện là L1 loss trên tọa độ box kết hợp với GIoU loss:
+\begin{equation}
+\mathcal{L}_{\mathrm{det}} = \lambda_1 \mathcal{L}_{\mathrm{L1}}(\hat{B}, B_{\mathrm{coarse}}) + \lambda_2 \mathcal{L}_{\mathrm{GIoU}}(\hat{B}, B_{\mathrm{coarse}})
+\label{eq:det-loss}
+\end{equation}
+
+\textbf{Bước 4: Sinh bounding box tinh chỉnh tại inference.}
+
+Tại inference, thay vì dùng $B_{\mathrm{coarse}}$ trực tiếp, dùng detector vừa huấn luyện để dự đoán $B_{\mathrm{refined}}$ cho mỗi ảnh. Sau đó áp dụng một bước mở rộng box có kiểm soát:
+\begin{equation}
+B_{\mathrm{final}} = B_{\mathrm{refined}} \oplus \delta
+\label{eq:box-expand}
+\end{equation}
+với $\delta$ là hệ số mở rộng nhỏ (ví dụ 5--10 pixel mỗi chiều) để đảm bảo box bao phủ đủ vùng biên của cấu trúc giải phẫu. $B_{\mathrm{final}}$ này được truyền vào SAM~\cite{ref2,ref4} thay cho $B_{\mathrm{coarse}}$.
+
+\textbf{Bước 5: Phần còn lại của pipeline.}
+
+SAM nhận $B_{\mathrm{final}}$ làm visual prompt và tạo ra $Y_{\text{zero-shot}}$. Stage 3 (nnUNet + checkpoint ensembling) hoạt động như trong bài báo gốc~\cite{ref1}, huấn luyện trên pseudo-label từ Stage 2.
+
+\textbf{Kết quả kỳ vọng.}
+
+Dựa trên kết quả của PPBoost~\cite{ref8} trên các bộ dữ liệu BraTS21, LiTS17 và KidneySeg (cải thiện +10.08\% mDSC so với MedCLIP-SAMv2), kỳ vọng bước tinh chỉnh bounding box này sẽ:
+\begin{itemize}
+    \item Tăng DSC tại đầu ra Stage 2 từ mức $\sim$77.61\% lên khoảng 82--85\%, tùy theo modality.
+    \item Giảm variance giữa các modality, đặc biệt trên Lung X-ray nơi saliency map hiện tại kích hoạt không đồng đều.
+    \item Cải thiện chất lượng pseudo-label đầu vào cho Stage 3, từ đó kéo theo kết quả cuối của nnUNet ensemble cao hơn mức 82.11\% trong bài báo gốc~\cite{ref1}.
+\end{itemize}
+
+%==============================================================================
+\section{Kết luận}
+\label{sec:ketluan}
+%==============================================================================
+
+\textbf{Tóm tắt kết quả thực nghiệm:}
+
+Trong giai đoạn thứ nhất, hệ thống thực hiện tinh chỉnh mô hình ngôn ngữ--thị giác BioMedCLIP~\cite{ref3} nhằm thiết lập một không gian vector liên kết chặt chẽ giữa đặc trưng hình ảnh bệnh lý và ngữ nghĩa của văn bản báo cáo lâm sàng.
+
+Giai đoạn thứ hai ứng dụng cơ chế Bottleneck thông tin đa phương thức (M2IB)~\cite{ref7} để trích xuất bản đồ kích hoạt chú ý, qua đó nhận diện các vùng mục tiêu giải phẫu. Kết quả này sau khi trải qua các bước xử lý hậu kỳ sẽ được tích hợp làm mồi dẫn hướng hình học (Visual Prompts) cho mô hình Segment Anything (SAM)~\cite{ref2,ref4} nhằm tự động tạo ra hệ thống nhãn giả (pseudo-labels) có độ tin cậy cao.
+
+Giai đoạn cuối cùng tiến hành huấn luyện mô hình nnU-Net theo cơ chế giám sát yếu (weakly supervised learning) trực tiếp trên tập hợp các nhãn giả đã thu được~\cite{ref1}, giúp tối ưu hóa khả năng phân vùng cục bộ và tăng cường tính tổng quát hóa của hệ thống.
+
+\textbf{Kết quả chính:} Trong bản triển khai hiện tại, chỉ Lung X-ray đạt hiệu năng trung bình chấp nhận được ($\approx$50\% DSC); các bộ dữ liệu còn lại (Breast US, Brain MRI, Lung CT) có DSC rất thấp ($\approx$4--9\%). Điều này cho thấy pipeline khả dụng nhưng chưa đủ tổng quát hóa trên nhiều modality.
+
+\textbf{Nguyên nhân chủ yếu:} Chất lượng pseudo-label thấp (saliency gần rỗng hoặc nhiễu) do hạn chế trong fine-tuning BioMedCLIP~\cite{ref3}, thiết lập M2IB~\cite{ref7}, và chiến lược hậu xử lý; các khác biệt triển khai và quy mô huấn luyện so với bài gốc~\cite{ref1} cũng đóng góp vào độ chính xác của mô hình dự đoán.
+
+\textbf{Ý nghĩa:} Phương pháp tổng thể (CLIP-based attribution + SAM + nnUNet) là một hướng khả thi để tận dụng tín hiệu ngôn ngữ--hình ảnh cho phân đoạn y tế khi pseudo-label có chất lượng tốt. Tuy nhiên, hiệu quả thực tế phụ thuộc mạnh vào từng modality và các bước trung gian.
 
 %==============================================================================
 \input{references}
