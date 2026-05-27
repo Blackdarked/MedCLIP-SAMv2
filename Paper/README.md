@@ -14,6 +14,7 @@ Tham khảo khung trình bày: `Oldpaper.pdf` (báo cáo nhóm trước — dự
 
 ```
 main.tex
+references.tex
 images/
   brain_sample_0001.png
   xray_sample_0001.png
